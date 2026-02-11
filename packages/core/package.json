@@ -12,6 +12,9 @@
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'",
     "test:snapshot": "mocha --require ts-node/register 'test/snapshot.test.ts'"
   },
+  "dependencies": {
+    "web-tree-sitter": "^0.21.0"
+  },
   "devDependencies": {
     "@types/mocha": "^10.0.0",
     "@types/node": "^22.0.0",

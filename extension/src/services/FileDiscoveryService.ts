@@ -19,6 +19,14 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import type { ExclusionSettings } from './DirectoryExclusion';
 import { readAspectSettings, updateAspectSettings } from './aspectSettings';
+import {
+  PACKAGE_MANAGER_DIRS,
+  CACHE_DIRS,
+  VCS_IDE_DIRS,
+  GENERATED_DIRS,
+  VENV_MARKERS,
+  BUILD_OUTPUT_MARKERS,
+} from '@aspectcode/core';
 
 // ============================================================================
 // Types
@@ -43,91 +51,6 @@ export interface ComputedExclusions {
   /** Timestamp when exclusions were computed */
   computedAt: number;
 }
-
-// ============================================================================
-// Default Exclusion Patterns (by category)
-// ============================================================================
-
-/** Package manager directories - always exclude by name */
-const PACKAGE_MANAGER_DIRS = [
-  'node_modules',
-  'bower_components',
-  'jspm_packages',
-  'vendor',
-  'packages',
-  'site-packages',
-  'dist-packages',
-  'eggs',
-  '.eggs',
-];
-
-/** Build output directories - exclude by name */
-const BUILD_OUTPUT_DIRS = [
-  'dist',
-  'build',
-  'out',
-  'output',
-  'target',
-  'bin',
-  'obj',
-  'lib',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  '.parcel-cache',
-  '.webpack',
-  '.rollup.cache',
-];
-
-/** Virtual environment directories - exclude by name or marker */
-const VENV_DIRS = [
-  'venv',
-  '.venv',
-  'env',
-  '.env',
-  'virtualenv',
-  '.virtualenv',
-  '.tox',
-  '.nox',
-  '.conda',
-];
-
-/** Cache directories - always exclude */
-const CACHE_DIRS = [
-  '__pycache__',
-  '.cache',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.ruff_cache',
-  '.hypothesis',
-  'coverage',
-  'htmlcov',
-  '.nyc_output',
-  '.coverage',
-];
-
-/** VCS and IDE directories - always exclude */
-const VCS_IDE_DIRS = ['.git', '.hg', '.svn', '.idea', '.vs', '.vscode'];
-
-/** Test framework output directories */
-const TEST_OUTPUT_DIRS = ['e2e', 'playwright-report', 'test-results', 'cypress', '.playwright'];
-
-/** Generated/framework directories */
-const GENERATED_DIRS = [
-  '.aspect',
-  'generated',
-  '__generated__',
-  '.serverless',
-  '.terraform',
-  '.pulumi',
-];
-
-/** Marker files for venv detection */
-const VENV_MARKERS = ['pyvenv.cfg', 'pip-selfcheck.json'];
-
-/** Marker files for build output detection */
-const BUILD_OUTPUT_MARKERS = ['.tsbuildinfo', '.buildinfo'];
 
 // ============================================================================
 // FileDiscoveryService

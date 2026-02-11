@@ -13,6 +13,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { getFileDiscoveryService } from './FileDiscoveryService';
+import {
+  PACKAGE_MANAGER_DIRS,
+  BUILD_OUTPUT_DIRS,
+  VENV_DIRS,
+  CACHE_DIRS,
+  VCS_IDE_DIRS,
+  TEST_OUTPUT_DIRS,
+  GENERATED_DIRS,
+} from '@aspectcode/core';
 
 // ============================================================================
 // Types
@@ -39,85 +48,6 @@ export interface ExclusionResult {
   /** Directories that would be excluded but are in 'never' list */
   overriddenDirs: string[];
 }
-
-// ============================================================================
-// Default Exclusion Patterns (kept for static access)
-// ============================================================================
-
-/** Package manager directories */
-const PACKAGE_MANAGER_DIRS = [
-  'node_modules',
-  'bower_components',
-  'jspm_packages',
-  'vendor',
-  'packages',
-  'site-packages',
-  'dist-packages',
-  'eggs',
-  '.eggs',
-];
-
-/** Build output directories */
-const BUILD_OUTPUT_DIRS = [
-  'dist',
-  'build',
-  'out',
-  'output',
-  'target',
-  'bin',
-  'obj',
-  'lib',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  '.parcel-cache',
-  '.webpack',
-  '.rollup.cache',
-];
-
-/** Virtual environment directories */
-const VENV_DIRS = [
-  'venv',
-  '.venv',
-  'env',
-  '.env',
-  'virtualenv',
-  '.virtualenv',
-  '.tox',
-  '.nox',
-  '.conda',
-];
-
-/** Cache directories */
-const CACHE_DIRS = [
-  '__pycache__',
-  '.cache',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.ruff_cache',
-  '.hypothesis',
-  'coverage',
-  'htmlcov',
-  '.nyc_output',
-  '.coverage',
-];
-
-/** VCS and IDE directories */
-const VCS_IDE_DIRS = ['.git', '.hg', '.svn', '.idea', '.vs', '.vscode'];
-
-/** Test framework output directories */
-const TEST_OUTPUT_DIRS = ['e2e', 'playwright-report', 'test-results', 'cypress', '.playwright'];
-
-/** Generated/framework directories */
-const GENERATED_DIRS = [
-  '.aspect',
-  'generated',
-  '__generated__',
-  '.serverless',
-  '.terraform',
-  '.pulumi',
-];
 
 // ============================================================================
 // DirectoryExclusionService (Legacy Compatibility)

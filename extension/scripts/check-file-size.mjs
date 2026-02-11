@@ -21,11 +21,10 @@ const DEFAULT_MAX_LINES = 400;
 const GRANDFATHERED = {
   'src/panel/PanelProvider.ts': 5600,
   'src/assistants/kb.ts': 4600,
-  'src/services/DependencyAnalyzer.ts': 1300,
+  'src/services/DependencyAnalyzer.ts': 75,
   'src/extension.ts': 1300,
-  'src/importExtractors.ts': 900,
   'src/services/gitignoreService.ts': 800,
-  'src/services/FileDiscoveryService.ts': 700,
+  'src/services/FileDiscoveryService.ts': 620,
   'src/test/kb.test.ts': 700,
   'src/newCommandsIntegration.ts': 700,
   'src/commandHandlers.ts': 700,

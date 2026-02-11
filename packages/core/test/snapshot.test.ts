@@ -18,7 +18,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { analyzeRepo, RepoModel } from '../src/index';
+import { analyzeRepo, AnalysisModel, computeModelStats, toPosix } from '../src/index';
 
 // Mocha globals
 declare function describe(name: string, fn: () => void): void;
@@ -49,11 +49,12 @@ function readFixtureFiles(rootDir: string, dir?: string): Map<string, string> {
 }
 
 /**
- * Strip volatile fields (timestamps, line counts that shift with formatting)
- * so the snapshot comparison is deterministic.
+ * Strip volatile fields (timestamps, absolute paths) so the snapshot
+ * comparison is deterministic.
  */
-function toComparableSnapshot(model: RepoModel) {
+function toComparableSnapshot(model: AnalysisModel) {
   return {
+    schemaVersion: model.schemaVersion,
     files: model.files
       .map((f) => ({
         relativePath: f.relativePath,
@@ -62,10 +63,9 @@ function toComparableSnapshot(model: RepoModel) {
         imports: [...f.imports].sort(),
       }))
       .sort((a, b) => a.relativePath.localeCompare(b.relativePath)),
-    stats: {
-      totalFiles: model.stats.totalFiles,
-      languages: model.stats.languages,
-    },
+    symbols: model.symbols,
+    graph: model.graph,
+    metrics: model.metrics,
   };
 }
 
@@ -100,10 +100,85 @@ describe('analyzeRepo snapshot', () => {
     const model = analyzeRepo(FIXTURE_DIR, files);
 
     const json = JSON.stringify(model);
-    const parsed = JSON.parse(json) as RepoModel;
+    const parsed = JSON.parse(json) as AnalysisModel;
 
     assert.strictEqual(parsed.files.length, model.files.length);
-    assert.strictEqual(parsed.stats.totalFiles, model.stats.totalFiles);
+    assert.strictEqual(parsed.schemaVersion, '0.1');
     assert.ok(parsed.generatedAt, 'should have a generatedAt timestamp');
+    assert.ok(Array.isArray(parsed.graph.nodes), 'should have graph.nodes');
+    assert.ok(Array.isArray(parsed.graph.edges), 'should have graph.edges');
+    assert.ok(Array.isArray(parsed.metrics.hubs), 'should have metrics.hubs');
+  });
+});
+
+// ── Determinism ──────────────────────────────────────────────
+
+describe('analyzeRepo determinism', () => {
+  it('produces identical output on consecutive runs (ignoring generatedAt)', () => {
+    const files = readFixtureFiles(FIXTURE_DIR);
+
+    const run1 = analyzeRepo(FIXTURE_DIR, files);
+    const run2 = analyzeRepo(FIXTURE_DIR, files);
+
+    // Strip the only volatile field
+    const strip = (m: AnalysisModel) => {
+      const { generatedAt: _, ...rest } = m;
+      return rest;
+    };
+
+    assert.deepStrictEqual(strip(run1), strip(run2));
+  });
+});
+
+// ── Path normalization ───────────────────────────────────────
+
+describe('toPosix', () => {
+  it('converts backslashes to forward slashes', () => {
+    assert.strictEqual(toPosix('src\\utils\\format.ts'), 'src/utils/format.ts');
+  });
+
+  it('strips leading ./', () => {
+    assert.strictEqual(toPosix('./src/app.ts'), 'src/app.ts');
+  });
+
+  it('collapses consecutive slashes', () => {
+    assert.strictEqual(toPosix('src//utils///format.ts'), 'src/utils/format.ts');
+  });
+
+  it('is idempotent on posix paths', () => {
+    const p = 'src/utils/format.ts';
+    assert.strictEqual(toPosix(p), p);
+  });
+
+  it('model files use posix paths even when input has backslashes', () => {
+    const files = new Map<string, string>();
+    files.set('src\\hello.ts', 'export const x = 1;');
+
+    const model = analyzeRepo('C:\\repo', files);
+    assert.strictEqual(model.files[0].relativePath, 'src/hello.ts');
+  });
+});
+
+// ── Model stats ──────────────────────────────────────────────
+
+describe('computeModelStats', () => {
+  it('computes correct counts from mini-repo', () => {
+    const files = readFixtureFiles(FIXTURE_DIR);
+    const model = analyzeRepo(FIXTURE_DIR, files);
+    const stats = computeModelStats(model);
+
+    assert.strictEqual(stats.fileCount, model.files.length);
+    assert.ok(stats.totalLines > 0, 'should have nonzero total lines');
+    assert.ok(stats.languageCount > 0, 'should have at least one language');
+    assert.strictEqual(stats.edgeCount, model.graph.edges.length);
+    assert.ok(Array.isArray(stats.topHubs), 'topHubs should be an array');
+  });
+
+  it('respects topN parameter', () => {
+    const files = readFixtureFiles(FIXTURE_DIR);
+    const model = analyzeRepo(FIXTURE_DIR, files);
+    const stats = computeModelStats(model, 2);
+
+    assert.ok(stats.topHubs.length <= 2, 'should respect topN limit');
   });
 });

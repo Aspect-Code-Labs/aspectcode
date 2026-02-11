@@ -4,70 +4,112 @@
  * This package contains pure-logic code with ZERO dependency on the `vscode`
  * module. Everything here must be usable from a CLI, a test harness, or the
  * VS Code extension equally.
- *
- * Phase 0: skeleton only. Code will be incrementally moved here from
- * extension/src/services/ and extension/src/assistants/ in later phases.
  */
 
-// ── Types ────────────────────────────────────────────────────
+// ── Re-exports: types ────────────────────────────────────────
 
-/** A dependency link between two files */
-export interface DependencyLink {
-  source: string;
-  target: string;
-  type: 'import' | 'export' | 'call' | 'inherit' | 'circular';
-  strength: number;
-  symbols: string[];
-  lines: number[];
-  bidirectional: boolean;
-}
+export type {
+  AnalysisModel,
+  AnalyzedFile,
+  ExtractedSymbol,
+  FileSymbols,
+  Graph,
+  GraphNode,
+  GraphEdge,
+  DependencyLink,
+  Metrics,
+  HubMetric,
+  RepoMeta,
+} from './model';
 
-/** A single file in the analyzed workspace */
-export interface AnalyzedFile {
-  /** Workspace-relative path (forward-slash separated) */
-  relativePath: string;
-  /** Detected language */
-  language: string;
-  /** Line count */
-  lineCount: number;
-  /** Exported symbols (functions, classes, types) */
-  exports: string[];
-  /** Imported modules */
-  imports: string[];
-}
+export type { CoreHost, WasmPaths } from './host';
+export { createNodeHost } from './host';
 
-/** The full analysis model for a workspace / repo */
-export interface RepoModel {
-  /** ISO-8601 timestamp of when the model was generated */
-  generatedAt: string;
-  /** Root-relative file list */
-  files: AnalyzedFile[];
-  /** Dependency graph edges */
-  dependencies: DependencyLink[];
-  /** Summary statistics */
-  stats: {
-    totalFiles: number;
-    totalLines: number;
-    languages: Record<string, number>;
-  };
-}
+// ── Re-exports: paths ────────────────────────────────────────
 
-// ── Placeholder implementation ───────────────────────────────
+export { toPosix } from './paths';
+
+// ── Re-exports: stats ────────────────────────────────────────
+
+export { computeModelStats } from './stats';
+export type { ModelStats } from './stats';
+
+// ── Re-exports: file system ──────────────────────────────────
+
+export {
+  DEFAULT_EXCLUSIONS,
+  SUPPORTED_EXTENSIONS,
+  PACKAGE_MANAGER_DIRS,
+  BUILD_OUTPUT_DIRS,
+  VENV_DIRS,
+  CACHE_DIRS,
+  VCS_IDE_DIRS,
+  TEST_OUTPUT_DIRS,
+  GENERATED_DIRS,
+  VENV_MARKERS,
+  BUILD_OUTPUT_MARKERS,
+  discoverFiles,
+} from './fs/index';
+export type { DiscoverOptions } from './fs/index';
+
+// ── Re-exports: parsers ──────────────────────────────────────
+
+export {
+  loadGrammars,
+  textFor,
+  extractPythonImports,
+  extractPythonSymbols,
+  extractTSJSImports,
+  extractTSJSSymbols,
+  extractJavaSymbols,
+  extractCSharpSymbols,
+} from './parsers/index';
+export type { LoadedGrammars, GrammarSummary, LogFn } from './parsers/index';
+
+// ── Re-exports: analysis ─────────────────────────────────────
+
+export {
+  DependencyAnalyzer,
+  analyzeFileImports,
+  analyzeFileCalls,
+  calculateImportStrength,
+  isLikelyExternalCall,
+  buildFileIndex,
+  resolveModulePathFast,
+  resolveCallTargetFast,
+} from './analysis/index';
+export type {
+  DependencyProgressCallback,
+  ImportStatement,
+  CallSite,
+  FileIndex,
+} from './analysis/index';
+
+// ── Backward-compat alias ────────────────────────────────────
+
+import type { AnalysisModel, AnalyzedFile } from './model';
+import { toPosix } from './paths';
 
 /**
- * Analyze a set of files and produce a serializable RepoModel.
+ * @deprecated Use `AnalysisModel` instead.
+ */
+export type RepoModel = AnalysisModel;
+
+// ── analyzeRepo (stub → will grow in later PRs) ─────────────
+
+/**
+ * Analyze a set of files and produce a serializable AnalysisModel.
  *
- * Today this is a stub. As code moves from the extension into core,
- * this function will grow to cover import extraction, dependency
- * analysis, and symbol discovery — all without touching `vscode`.
+ * Today this is a regex-based stub. In later PRs it will grow to use
+ * tree-sitter extraction, real dependency resolution, and hub metrics.
  *
  * @param rootDir  Absolute path to the workspace root
  * @param files    Map of relative-path → file content
  */
 export function analyzeRepo(
-  _rootDir: string,
+  rootDir: string,
   files: Map<string, string>,
-): RepoModel {
+): AnalysisModel {
   const analyzedFiles: AnalyzedFile[] = [];
   const languageCounts: Record<string, number> = {};
   let totalLines = 0;
@@ -81,24 +123,17 @@ export function analyzeRepo(
     totalLines += lineCount;
     languageCounts[language] = (languageCounts[language] ?? 0) + 1;
 
-    analyzedFiles.push({
-      relativePath,
-      language,
-      lineCount,
-      exports,
-      imports,
-    });
+    analyzedFiles.push({ relativePath: toPosix(relativePath), language, lineCount, exports, imports });
   }
 
   return {
+    schemaVersion: '0.1',
     generatedAt: new Date().toISOString(),
+    repo: { root: rootDir },
     files: analyzedFiles,
-    dependencies: [], // Phase 1: wire up dependency resolution
-    stats: {
-      totalFiles: analyzedFiles.length,
-      totalLines,
-      languages: languageCounts,
-    },
+    symbols: [],
+    graph: { nodes: [], edges: [] },
+    metrics: { hubs: [] },
   };
 }
 
@@ -114,6 +149,7 @@ function detectLanguage(filePath: string): string {
     py: 'python',
     java: 'java',
     cs: 'csharp',
+    go: 'go',
   };
   return map[ext] ?? 'unknown';
 }
@@ -122,13 +158,13 @@ function detectLanguage(filePath: string): string {
 function extractExportNames(content: string, language: string): string[] {
   const names: string[] = [];
   if (language === 'typescript' || language === 'javascript') {
-    const re = /export\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
+    const re =
+      /export\s+(?:default\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(content)) !== null) {
       names.push(m[1]);
     }
   } else if (language === 'python') {
-    // Top-level def/class are implicitly exported
     const re = /^(?:def|class)\s+(\w+)/gm;
     let m: RegExpExecArray | null;
     while ((m = re.exec(content)) !== null) {

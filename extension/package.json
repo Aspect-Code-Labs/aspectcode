@@ -180,6 +180,7 @@
     "typescript-eslint": "^8.0.0"
   },
   "dependencies": {
+    "@aspectcode/core": "*",
     "diff": "^5.2.0",
     "tree-sitter-wasms": "0.1.13",
     "web-tree-sitter": "^0.21.0",
