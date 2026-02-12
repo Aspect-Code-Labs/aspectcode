@@ -5,15 +5,45 @@ Thanks for your interest in contributing to Aspect Code!
 ## Quick Start
 
 ```bash
-cd extension
+# From repo root — installs all workspace packages
 npm install
-npm run build
+
+# Build all packages (core → emitters → cli → extension)
+npm run build --workspaces
+cd extension && npm run build && cd ..
+
+# Run all tests
+npm test --workspaces
 ```
 
-Open the `extension/` folder in VS Code, press **F5** to launch the
-Extension Development Host.
+Open the repo root in VS Code, press **F5** to launch the Extension
+Development Host.
+
+For offline development, see [docs/OFFLINE-EDITING.md](docs/OFFLINE-EDITING.md).
+
+## Repository Structure
+
+```
+packages/core/        @aspectcode/core      Pure analysis (no vscode)
+packages/emitters/    @aspectcode/emitters   Artifact generation
+packages/cli/         @aspectcode/cli        CLI entry point
+extension/                                   VS Code extension
+docs/                                        Architecture & guides
+```
+
+Full architecture: [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)
 
 ## Development Scripts
+
+### Root (all packages)
+
+| Command | What it does |
+|---------|-------------|
+| `npm install` | Install all workspace dependencies |
+| `npm run build --workspaces` | Build core → emitters → cli |
+| `npm test --workspaces` | Run all package tests |
+
+### Extension (`cd extension`)
 
 | Command | What it does |
 |---------|-------------|
@@ -28,30 +58,42 @@ Extension Development Host.
 | `npm run check:boundaries` | Check dependency boundary rules |
 | `npm run check:all` | Run all checks (lint + format + filesize + boundaries) |
 
+### Any package (`cd packages/core`, etc.)
+
+| Command | What it does |
+|---------|-------------|
+| `npm run build` | Build with tsc |
+| `npm run typecheck` | Type-check only |
+| `npm test` | Run mocha tests |
+
 ## What to Work On
 
 - Bug fixes and reliability improvements
-- Documentation improvements
-- Small, focused UX improvements in the panel
+- Testing — adding tests for existing code
 - Reducing the size of grandfathered large files (see `docs/ARCHITECTURE.md`)
+- Moving logic from extension into `packages/core` or `packages/emitters`
+- CLI enhancements
 
 If you're unsure, open an issue describing what you want to change.
 
 ## Architecture Rules
 
-Read **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** before making changes.
+Read **[docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)** and
+**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** before making changes.
 Key rules:
 
-1. **File size limit:** New files must be ≤ 400 lines. Grandfathered files
+1. **Package boundaries:** `core` has no `vscode` import. `emitters` depends
+   only on `core`. `cli` depends on both. Extension depends on both.
+2. **File size limit:** New files must be ≤ 400 lines. Grandfathered files
    must not grow beyond their current cap.
-2. **Layering:** `services/` must not import from `panel/`, `assistants/`,
-   `commandHandlers`, or `extension.ts`.
-3. **Formatting:** All code is formatted with Prettier. Run `npm run format`
+3. **Layering (extension):** `services/` must not import from `panel/`,
+   `assistants/`, `commandHandlers`, or `extension.ts`.
+4. **Formatting:** All code is formatted with Prettier. Run `npm run format`
    before committing.
-4. **Linting:** All code must pass ESLint. Run `npm run lint` before
+5. **Linting:** All code must pass ESLint. Run `npm run lint` before
    committing.
-5. **Types:** Shared types go in `src/types/`. Prefer explicit types over
-   `any`.
+6. **Types:** Shared types go in `src/types/` or the appropriate package.
+   Prefer explicit types over `any`.
 
 ## Pull Requests
 

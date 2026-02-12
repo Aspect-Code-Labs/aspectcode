@@ -1,16 +1,18 @@
 # Architecture
 
-> This document describes the current architecture of Aspect Code and the
-> target direction for the codebase. It is the source-of-truth for layering
-> rules, naming conventions, and "where does new code go?" decisions.
+> Extension-specific layering rules, file size limits, and conventions.
+> For the full system architecture (all packages), see
+> [SYSTEM-ARCHITECTURE.md](SYSTEM-ARCHITECTURE.md).
 
 ## Current State
 
-Aspect Code is a **VS Code extension** that generates a project-local
-knowledge base (`.aspect/` directory) containing `architecture.md`, `map.md`,
-`context.md`, and AI-assistant instruction files.
+Aspect Code is a multi-package TypeScript monorepo. Pure analysis and
+generation logic lives in `packages/core` and `packages/emitters`. The
+CLI (`packages/cli`) and VS Code extension (`extension/`) consume them.
 
-All runtime code lives under `extension/src/`:
+The extension still contains legacy code (large files, inline UI) that
+is being incrementally extracted. This document covers the **extension**
+layering rules. Extension-specific code lives under `extension/src/`:
 
 ```
 extension/src/
@@ -41,40 +43,41 @@ extension/src/
 
 ### Known Issues
 
-| Issue | Severity |
-|-------|----------|
-| `PanelProvider.ts` is 5,300+ LOC with inline HTML, CSS, JS, graph layout, and message handling | Critical |
-| `kb.ts` is 4,000+ LOC mixing file analysis, markdown generation, and template logic | Critical |
-| Every file imports `vscode` — no pure-logic layer exists | High |
-| `state.ts` is a mutable singleton bag; hard to test | Medium |
-| No barrel files or module boundary contracts | Low |
+| Issue | Severity | Status |
+|-------|----------|--------|
+| `PanelProvider.ts` is 5,300+ LOC with inline HTML, CSS, JS | Critical | **Phase 4: remove entirely** |
+| `kb.ts` is 4,000+ LOC mixing analysis and generation | Critical | Partially delegated to emitters |
+| `state.ts` is a mutable singleton bag; hard to test | Medium | Open |
+| Legacy instruction/detection code duplicated with emitters | Low | Emitters are now canonical |
 
-## Target Direction
-
-The long-term goal is a three-layer architecture:
+## Current Architecture (multi-package)
 
 ```
 ┌─────────────────────────────────┐
-│  extension/  (thin VS Code      │
-│  adapter: commands, lifecycle,   │
-│  webview host)                   │
+│  extension/  (VS Code adapter:  │──▶ @aspectcode/core
+│  commands, lifecycle, panel)     │──▶ @aspectcode/emitters
 ├─────────────────────────────────┤
-│  packages/core/  (pure TS:      │
-│  analysis, KB gen, templates —  │
-│  NO vscode import)              │
+│  packages/cli/                  │──▶ @aspectcode/core
+│  (Node CLI entry point)         │──▶ @aspectcode/emitters
 ├─────────────────────────────────┤
-│  cli/  (optional Node CLI       │
-│  consuming @aspectcode/core)    │
+│  packages/emitters/             │──▶ @aspectcode/core
+│  (KB, instructions, manifest)   │
+├─────────────────────────────────┤
+│  packages/core/                 │   (zero external deps)
+│  (analysis, discovery, stats)   │
 └─────────────────────────────────┘
 ```
 
-`packages/core/` now exists as a skeleton (`@aspectcode/core`). It defines
-the `RepoModel` type and a stub `analyzeRepo()` function. Code will be
-moved here incrementally from `extension/src/services/` and
-`extension/src/assistants/` in later phases.
+Packages that now exist and are functional:
+- **`@aspectcode/core`** — `analyzeRepo()`, `discoverFiles()`, `DependencyAnalyzer`, tree-sitter grammars
+- **`@aspectcode/emitters`** — `runEmitters()`, KB emitter, instructions emitter, manifest, transactions
+- **`@aspectcode/cli`** — `aspectcode init`, `aspectcode generate`
 
-**Phase 0 does NOT do the extraction.** It installs guardrails so that
-future extraction is safe and incremental.
+### Phase 4 Target
+
+The extension will shell out to `aspectcode generate --json` and render
+the result. `PanelProvider.ts` (webview) will be removed entirely. The
+extension becomes a thin wrapper: lifecycle, commands, status bar.
 
 ## Layering Rules (enforced in CI)
 
@@ -97,17 +100,17 @@ These rules are checked by `npm run check:boundaries`:
 
 6. **Test files** are exempt from boundary rules.
 
-### Future Rule (Phase 1+)
+### Cross-package Rules (enforced structurally)
 
-- `packages/core/` must NOT import `vscode`. This is already enforced
-  structurally (core has no vscode dependency) and will be checked in CI.
-- `extension/` will import from `@aspectcode/core` instead of reaching
-  into raw analysis code.
+- `packages/core/` has no `vscode` dependency — cannot import it.
+- `packages/emitters/` depends only on `core` — no `vscode`.
+- `packages/cli/` depends on `core` + `emitters` — no `vscode`.
+- `extension/` imports from `@aspectcode/core` and `@aspectcode/emitters`.
 
 ### Soft Rules (warn only, future ratchets)
 
 These are logged as warnings by `npm run check:boundaries` but do not
-fail CI yet. They will be promoted to hard rules as code moves to core:
+fail CI yet:
 
 - `panel/` should not import from `commandHandlers` or `extension.ts`
 - `assistants/` should not import from `panel/`
@@ -137,15 +140,25 @@ Enforced by `npm run check:filesize`:
 
 | You're adding… | Put it in… |
 |----------------|-----------|
-| A new VS Code command handler | `commandHandlers.ts` (or a new file in a future `commands/` folder if it would exceed the size cap) |
-| A new service (file I/O, workspace scanning) | `services/NewService.ts` |
-| New KB generation logic | `assistants/kb.ts` (or extract a helper into `assistants/`) |
-| A new assistant integration | `assistants/` |
-| Webview UI changes | `panel/` — but prefer extracting HTML/CSS into separate files |
-| Shared TypeScript types | `types/` |
-| Pure logic with no VS Code dependency | `packages/core/src/` |
+| Pure analysis logic (no vscode) | `packages/core/src/` |
+| Artifact generation / content builders | `packages/emitters/src/` |
+| A new CLI command | `packages/cli/src/commands/` |
+| A new VS Code command handler | `extension/src/commandHandlers.ts` |
+| A new service (file I/O, workspace scanning) | `extension/src/services/` |
+| Shared TypeScript types | `packages/core/src/` or `extension/src/types/` |
 
 ## Testing
+
+All tests run offline. No network access required.
+
+| Package | Runner | Tests | Notes |
+|---------|--------|-------|-------|
+| `@aspectcode/core` | mocha + ts-node | 10 | Snapshot tests against fixture repo |
+| `@aspectcode/emitters` | mocha + ts-node | 78 | KB, instructions, manifest, transaction |
+| `@aspectcode/cli` | mocha + ts-node | 27 | parseArgs, config, init, generate e2e |
+| Extension | VS Code test harness | 1+ | `kb.test.ts` |
+
+Run all: `npm test --workspaces`
 
 ### Fixture repo
 
@@ -162,10 +175,6 @@ fixture repo and compares the JSON output to a committed snapshot at
 - **To run:** `cd packages/core && npm test`
 - **To update the snapshot after intentional model changes:**
   delete the expected JSON and re-run, or pass `--update`.
-
-This avoids arguing about markdown diffs when refactoring analysis code.
-The model is a JSON-serializable `RepoModel` — the source of truth for
-what the analysis produces.
 
 ## How to Add a Feature (checklist)
 

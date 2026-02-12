@@ -76,6 +76,7 @@ Python, TypeScript, JavaScript, Java, C#
 ## Requirements
 
 - VS Code 1.92.0 or higher
+- **Works fully offline** — no internet connection required
 
 ---
 
