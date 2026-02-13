@@ -8,9 +8,9 @@ _Read this first. Describes the project layout and "Do Not Break" zones._
 
 | Directory | Files | Purpose |
 |-----------|-------|--------|
-| `extension/src/services/` | 8 | Services |
-| `extension/src/` | 6 | Source code |
-| `extension/src/assistants/` | 3 | General |
+| `extension/src/services/` | 9 | Services |
+| `extension/src/` | 5 | Source code |
+| `extension/src/assistants/` | 4 | General |
 | `extension/scripts/` | 2 | General |
 
 ## Tests
@@ -18,4 +18,4 @@ _Read this first. Describes the project layout and "Do Not Break" zones._
 **Test files:** 1 | **Dirs:** extension/src/test
 
 
-_Generated: 2026-02-12T07:05:58.318Z_
+_Generated: 2026-02-13T21:47:38.488Z_

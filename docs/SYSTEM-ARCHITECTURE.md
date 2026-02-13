@@ -1,7 +1,7 @@
 # System Architecture
 
 > Source-of-truth for layering, package responsibilities, and data flow.
-> Last updated: 2026-02-12 (CLI-first migration, test-first execution).
+> Last updated: 2026-02-13 (CLI-first migration complete, impact command added).
 
 ---
 
@@ -33,11 +33,11 @@ aspectcode/                         ← npm workspaces root
 
 ```
   ┌────────────┐
-  │  extension  │──uses──▶ @aspectcode/core
-  │  (VS Code)  │──uses──▶ @aspectcode/emitters
-  └─────┬───────┘
-        │ Phase 4: calls CLI via child_process
-        ▼
+  │  extension  │──calls──▶ @aspectcode/cli (subprocess, preferred)
+  │  (VS Code)  │──uses──▶ @aspectcode/core (in-process fallback)
+  │             │──uses──▶ @aspectcode/emitters (in-process fallback)
+  └─────────────┘
+        │
   ┌────────────┐
   │    cli      │──uses──▶ @aspectcode/core
   │  (Node.js)  │──uses──▶ @aspectcode/emitters
@@ -51,7 +51,8 @@ aspectcode/                         ← npm workspaces root
 
 **Rule:** `core` has zero knowledge of `emitters`, `cli`, or `extension`.
 `emitters` depends on `core` only. `cli` depends on both. `extension`
-depends on both (and in Phase 4, may invoke the CLI binary instead).
+prefers calling CLI as a subprocess; falls back to `core` + `emitters`
+in-process when the CLI binary is unavailable.
 
 ---
 
@@ -65,6 +66,7 @@ Pure TypeScript. No `vscode` import, no Node-specific I/O beyond
 | Export | Purpose |
 |--------|---------|
 | `analyzeRepo(root, files)` | Build an `AnalysisModel` from source files (sync, regex-based) |
+| `analyzeRepoWithDependencies(root, files, host)` | `analyzeRepo` + `DependencyAnalyzer` graph/hubs |
 | `discoverFiles(root, opts?)` | Recursive walk → sorted absolute paths |
 | `computeModelStats(model, topN)` | Summary stats from a model |
 | `DependencyAnalyzer` | Full import/export/call graph builder |
@@ -103,12 +105,14 @@ No external command framework — hand-rolled argv parser.
 | `aspectcode init` | Create `aspectcode.json` config file | human-readable |
 | `aspectcode generate` | Discover → analyze → emit (full pipeline) | human-readable by default, JSON with `--json`; dependency output can be scoped by `--file` |
 | `aspectcode watch` | Watch files and trigger `generate` by mode | long-running process |
+| `aspectcode impact` | Compute dependency impact for a single file | human-readable by default, JSON with `--json` |
 | `aspectcode deps list` | Compute and list dependency connections only | human-readable; supports `--file` filter |
 
 Key flags:
 - Global-ish: `--root`, `--verbose`, `--quiet`, `--help`, `--version`
 - `init`: `--force`
-- `generate`: `--out`, `--list-connections`, `--json`, `--file` (for connection filtering)
+- `generate`: `--out`, `--list-connections`, `--json`, `--file`, `--kb-only`, `--copilot`, `--cursor`, `--claude`, `--other`, `--instructions-mode`
+- `impact`: `--file` (required), `--json`
 - `deps list`: `--file` (connection filtering)
 - `watch`: `--mode` (`manual|onChange|idle`)
 
@@ -122,12 +126,13 @@ Current config compatibility rules:
 ### extension/
 
 VS Code extension. Thin adapter: lifecycle, commands, file watchers,
-tree-sitter initialization. Delegates analysis and
-generation to `core` and `emitters`.
+tree-sitter initialization. Delegates generation and impact
+analysis to the CLI binary via subprocess (`CliAdapter.ts`), falling
+back to in-process `core` + `emitters` when the CLI is unavailable.
 
-In Phase 4 the extension will shell out to the CLI binary
-(`aspectcode generate --json`) and render the result, removing most
-inline generation logic.
+Key service: `CliAdapter.ts` resolves the CLI binary (workspace-local →
+npm resolve → PATH fallback) and spawns it with JSON output capture,
+cancellation support, and timeout handling.
 
 ---
 
@@ -169,27 +174,35 @@ aspectcode watch
   └─ 4. keep process alive until SIGINT/SIGTERM
 ```
 
-### Extension Pipeline (current)
+### Extension Pipeline (current — CLI-first with fallback)
 
 ```
 User action (click / save / idle)
   │
-  ├─ regenerateEverything()   extension/src/assistants/kb.ts
-  │   ├─ build AnalysisModel from workspace
-  │   └─ runEmitters(model, vscodeHost, opts)
-  └─ Status bar update
-```
-
-### Extension Pipeline (Phase 4 target)
-
-```
-User action (click / save / idle)
+  ├─ regenerateEverything()            extension/src/assistants/kb.ts
+  │   └─ generateKnowledgeBase()
+  │       ├─ TRY: cliGenerate(root, ['--kb-only'])
+  │       │   (spawns: aspectcode generate --json --kb-only)
+  │       │   exit 0 + valid JSON → done
+  │       └─ FALLBACK: generateKnowledgeBaseInProcess()
+  │           ├─ analyzeRepoWithDependencies()       @aspectcode/core
+  │           └─ runEmitters(model, vscodeHost)       @aspectcode/emitters
   │
-  ├─ child_process.exec("aspectcode generate --json")
-  │   └─ stdout → EmitReport JSON
-  ├─ Render summary in status bar / notification
-  └─ dependency listing via CLI (`aspectcode deps list`)
+  ├─ emitInstructionFilesOnlyViaEmitters()   commandHandlers.ts
+  │   ├─ TRY: cliGenerateWithInstructions(root, assistants)
+  │   │   (spawns: aspectcode generate --json --copilot --cursor …)
+  │   └─ FALLBACK: createInstructionsEmitter().emit()
+  │
+  └─ computeImpactSummaryForFile()     extension/src/assistants/kb.ts
+      ├─ TRY: cliImpact(root, relPath)
+      │   (spawns: aspectcode impact --file <path> --json)
+      └─ FALLBACK: DependencyAnalyzer in-process
 ```
+
+CLI resolution order in `CliAdapter.resolveCliBin()`:
+1. Workspace-local: `<root>/packages/cli/bin/aspectcode.js`
+2. npm resolve: `require.resolve('@aspectcode/cli/bin/aspectcode.js')`
+3. Global PATH: `aspectcode`
 
 ---
 
@@ -248,10 +261,10 @@ This keeps extension changes low-risk while command behavior stabilizes.
 
 | Package | Runner | Count | Notes |
 |---------|--------|-------|-------|
-| `@aspectcode/core` | mocha + ts-node | 10 | Snapshot tests against fixture repo |
-| `@aspectcode/emitters` | mocha + ts-node | 78 | KB, instructions, manifest, transaction |
-| `@aspectcode/cli` | mocha + ts-node | 37 | parseArgs, config compatibility, init, generate, deps |
-| Extension | mocha (VS Code test harness) | 1+ | `kb.test.ts` |
+| `@aspectcode/core` | mocha + ts-node | 11 | Snapshot tests against fixture repo |
+| `@aspectcode/emitters` | mocha + ts-node | 79 | KB, instructions, manifest, transaction |
+| `@aspectcode/cli` | mocha + ts-node | 49 | parseArgs, config, init, generate, deps, watch |
+| Extension | mocha + ts-node | 10 | KB invariant + shared analysis tests |
 
 All tests are offline. Temp directories via `os.tmpdir()`, fixed
 timestamps for determinism.
@@ -277,15 +290,24 @@ npm test --workspaces
 
 ---
 
-## Phase 4 Plan (Next)
+## Phase 4 Status
 
-> Extension calls CLI for generation and dependency listing; CLI behavior is validated first via tests.
+> Extension calls CLI for generation, instruction emission, and impact
+> analysis; falls back to in-process when CLI unavailable.
 
-1. Expand CLI test coverage for all current command modes/flags.
-2. Implement new CLI functionality behind those tests.
-3. Extension spawns `aspectcode generate --json` via `child_process`.
-4. Extension renders EmitReport summary (status bar / notification).
-5. Keep extension UI minimal (status + commands only).
+**Done:**
+1. ✅ CLI test coverage expanded (49 tests covering all commands/flags).
+2. ✅ New CLI flags: `--kb-only`, `--copilot`, `--cursor`, `--claude`, `--other`, `--instructions-mode`.
+3. ✅ New CLI command: `aspectcode impact --file <path> --json`.
+4. ✅ Extension spawns CLI for KB generation (`generate --json --kb-only`).
+5. ✅ Extension spawns CLI for instructions (`generate --json --copilot …`).
+6. ✅ Extension spawns CLI for impact (`impact --file <path> --json`).
+7. ✅ `CliAdapter.ts` with hybrid resolution (local → npm → PATH).
+
+**Remaining:**
+- Full watch delegation via CLI subprocess (`cliWatch` helper exists, not yet primary path).
+- `state.ts` cleanup (mutable singleton → scoped context).
+- Remove remaining extension-side `DependencyAnalyzer` / `importExtractors` once CLI path is stable.
 
 Optional: `aspectcode watch --json` with streaming updates (newline-
 delimited JSON) for live regeneration without polling.

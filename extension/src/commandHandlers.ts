@@ -23,6 +23,7 @@ import {
   setExtensionEnabledSetting,
 } from './services/aspectSettings';
 import { cancelAndResetAllInFlightWork } from './services/enablementCancellation';
+import { cliGenerateWithInstructions } from './services/CliAdapter';
 
 /**
  * Activate the new engine-based commands.
@@ -431,6 +432,25 @@ async function emitInstructionFilesOnlyViaEmitters(
   const mode = await getInstructionsModeSetting(workspaceRoot, outputChannel);
   const assistants = assistantsOverride ?? (await getAssistantsSettings(workspaceRoot, outputChannel));
 
+  // ── Try CLI subprocess first ──────────────────────────────
+  const cliResult = await cliGenerateWithInstructions(
+    workspaceRoot.fsPath,
+    assistants,
+    { outputChannel, instructionsMode: mode },
+  );
+
+  if (cliResult.exitCode === 0 && cliResult.data) {
+    outputChannel.appendLine(
+      `[Instructions] CLI generated ${cliResult.data.wrote.length} file(s) (mode=${mode})`,
+    );
+    return cliResult.data.wrote.length;
+  }
+
+  // ── In-process fallback ───────────────────────────────────
+  outputChannel.appendLine(
+    `[Instructions] CLI unavailable (exit=${cliResult.exitCode}), falling back to in-process`,
+  );
+
   const generatedAt = new Date().toISOString();
   const model: AnalysisModel = {
     schemaVersion: '0.1',
@@ -453,7 +473,7 @@ async function emitInstructionFilesOnlyViaEmitters(
   });
 
   outputChannel.appendLine(
-    `[Instructions] Emitters updated ${result.filesWritten.length} file(s) (mode=${mode})`,
+    `[Instructions] In-process emitters updated ${result.filesWritten.length} file(s) (mode=${mode})`,
   );
 
   return result.filesWritten.length;

@@ -38,6 +38,21 @@ export interface CliFlags {
 
   /** --mode: watch mode override. */
   mode?: 'manual' | 'onChange' | 'idle';
+
+  /** --kb-only: generate KB artifacts only, skip instruction files. */
+  kbOnly: boolean;
+
+  /** --copilot: enable Copilot instruction file. */
+  copilot: boolean;
+  /** --cursor: enable Cursor instruction file. */
+  cursor: boolean;
+  /** --claude: enable Claude instruction file. */
+  claude: boolean;
+  /** --other: enable AGENTS.md instruction file. */
+  other: boolean;
+
+  /** --instructions-mode: instruction generation mode. */
+  instructionsMode?: 'safe' | 'permissive' | 'off';
 }
 
 /** Exit codes. */

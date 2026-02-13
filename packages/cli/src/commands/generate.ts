@@ -72,11 +72,32 @@ export async function runGenerate(
     `${fmt.bold(String(model.graph.edges.length))} edges`,
   );
 
-  // ── 5. Resolve instruction target (AGENTS.md only) ───────
+  // ── 5. Resolve instruction target ─────────────────────────
   const host = createNodeEmitterHost();
-  const assistants: AssistantFlags = { other: true };
-  const instructionsMode = 'safe';
-  log.info(`Instructions target: ${fmt.cyan('AGENTS.md')}`);
+
+  // Determine assistant selection: explicit flags override default.
+  const hasExplicitAssistants = flags.copilot || flags.cursor || flags.claude || flags.other;
+  const assistants: AssistantFlags = flags.kbOnly
+    ? {}
+    : hasExplicitAssistants
+      ? {
+          copilot: flags.copilot || undefined,
+          cursor: flags.cursor || undefined,
+          claude: flags.claude || undefined,
+          other: flags.other || undefined,
+        }
+      : { other: true };
+
+  const instructionsMode = flags.kbOnly
+    ? 'off'
+    : (flags.instructionsMode ?? 'safe');
+
+  if (!flags.kbOnly) {
+    const targets = Object.entries(assistants)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    log.info(`Instructions target: ${fmt.cyan(targets.join(', ') || '(none)')}`);
+  }
 
   // ── 6. Emit artifacts ─────────────────────────────────────
   log.blank();

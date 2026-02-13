@@ -14,6 +14,7 @@ import { runInit } from './commands/init';
 import { runGenerate } from './commands/generate';
 import { runDepsList } from './commands/deps';
 import { runWatch } from './commands/watch';
+import { runImpact } from './commands/impact';
 
 // ── Argv parsing ─────────────────────────────────────────────
 
@@ -26,6 +27,11 @@ export function parseArgs(argv: string[]): CliArgs {
     listConnections: false,
     json: false,
     force: false,
+    kbOnly: false,
+    copilot: false,
+    cursor: false,
+    claude: false,
+    other: false,
   };
   const positionals: string[] = [];
   let command = '';
@@ -72,6 +78,26 @@ export function parseArgs(argv: string[]): CliArgs {
       if (v === 'manual' || v === 'onChange' || v === 'idle') {
         flags.mode = v;
       }
+    } else if (arg === '--kb-only') {
+      flags.kbOnly = true;
+    } else if (arg === '--copilot') {
+      flags.copilot = true;
+    } else if (arg === '--cursor') {
+      flags.cursor = true;
+    } else if (arg === '--claude') {
+      flags.claude = true;
+    } else if (arg === '--other') {
+      flags.other = true;
+    } else if (arg === '--instructions-mode') {
+      const v = args[++i];
+      if (v === 'safe' || v === 'permissive' || v === 'off') {
+        flags.instructionsMode = v;
+      }
+    } else if (arg.startsWith('--instructions-mode=')) {
+      const v = arg.slice('--instructions-mode='.length);
+      if (v === 'safe' || v === 'permissive' || v === 'off') {
+        flags.instructionsMode = v;
+      }
     } else if (arg.startsWith('-')) {
       // Unknown flag — ignore for forward compat
     } else if (!command) {
@@ -99,6 +125,7 @@ ${fmt.bold('COMMANDS')}
   init        Create an ${fmt.cyan('aspectcode.json')} config file
   generate    Discover, analyze, and emit KB artifacts (+ ${fmt.cyan('AGENTS.md')})
   watch       Watch source files and regenerate on changes
+  impact      Compute impact analysis for a file
   deps list   List dependency connections
 
 ${fmt.bold('OPTIONS')}
@@ -108,6 +135,12 @@ ${fmt.bold('OPTIONS')}
       --json                 Print JSON output (for automation)
       --file <path>          Filter dependency connection output to one workspace file
       --mode <mode>          Watch mode override: manual|onChange|idle
+      --kb-only              Generate KB artifacts only (skip instruction files)
+      --copilot              Enable Copilot instruction file
+      --cursor               Enable Cursor instruction file
+      --claude               Enable Claude instruction file
+      --other                Enable AGENTS.md instruction file
+      --instructions-mode <m>  Instruction mode: safe|permissive|off
   -f, --force                Overwrite existing config (init)
   -v, --verbose              Show debug output
   -q, --quiet                Suppress non-error output
@@ -184,6 +217,12 @@ async function main(): Promise<void> {
     case 'watch': {
       const config = loadConfig(root);
       result = await runWatch(root, flags, config, log);
+      break;
+    }
+
+    case 'impact': {
+      const config = loadConfig(root);
+      result = await runImpact(root, flags, config, log);
       break;
     }
 

@@ -19,8 +19,6 @@ npm test --workspaces
 Open the repo root in VS Code, press **F5** to launch the Extension
 Development Host.
 
-For offline development, see [docs/OFFLINE-EDITING.md](docs/OFFLINE-EDITING.md).
-
 ## Repository Structure
 
 ```
@@ -86,14 +84,14 @@ Key rules:
    only on `core`. `cli` depends on both. Extension depends on both.
 2. **File size limit:** New files must be ≤ 400 lines. Grandfathered files
    must not grow beyond their current cap.
-3. **Layering (extension):** `services/` must not import from `panel/`,
+3. **Layering (extension):** `services/` must not import from
    `assistants/`, `commandHandlers`, or `extension.ts`.
 4. **Formatting:** All code is formatted with Prettier. Run `npm run format`
    before committing.
 5. **Linting:** All code must pass ESLint. Run `npm run lint` before
    committing.
-6. **Types:** Shared types go in `src/types/` or the appropriate package.
-   Prefer explicit types over `any`.
+6. **Types:** Shared types go in the appropriate package (`packages/core/src/`
+   or `packages/emitters/src/`). Prefer explicit types over `any`.
 
 ## Pull Requests
 

@@ -10,70 +10,85 @@ Aspect Code is a multi-package TypeScript monorepo. Pure analysis and
 generation logic lives in `packages/core` and `packages/emitters`. The
 CLI (`packages/cli`) and VS Code extension (`extension/`) consume them.
 
-The extension still contains legacy code (large files, inline UI) that
-is being incrementally extracted. This document covers the **extension**
-layering rules. Extension-specific code lives under `extension/src/`:
+The extension is a thin VS Code adapter: lifecycle, commands, file
+watchers, status bar. It tries CLI subprocess calls first and falls back
+to in-process `@aspectcode/core` + `@aspectcode/emitters` when the CLI
+binary is not available. This document covers the **extension** layering
+rules. Extension-specific code lives under `extension/src/`:
 
 ```
 extension/src/
-├── extension.ts            – VS Code activate/deactivate, wiring
+├── extension.ts            – VS Code activate/deactivate, wiring (~384 lines)
 ├── commandHandlers.ts      – Command palette handlers
 ├── state.ts                – Shared mutable state (AspectCodeState)
 ├── tsParser.ts             – Tree-sitter grammar loading
-├── importExtractors.ts     – Language-specific import extraction
+├── importExtractors.ts     – Language-specific import extraction (fallback only)
 ├── assistants/
-│   ├── kb.ts               – Knowledge-base generation (architecture, map, context)
-│   ├── instructions.ts     – AI-assistant instruction file generation
+│   ├── kb.ts               – KB generation + impact (CLI-first, ~544 lines)
+│   ├── kbShared.ts         – buildRelativeFileContentMap helper
+│   ├── instructions.ts     – AI-assistant instruction file constants
 │   └── detection.ts        – Detect installed AI assistants
 ├── services/
+│   ├── CliAdapter.ts       – CLI subprocess bridge (resolve, spawn, parse)
 │   ├── DependencyAnalyzer.ts
 │   ├── FileDiscoveryService.ts
 │   ├── WorkspaceFingerprint.ts
 │   ├── aspectSettings.ts
 │   ├── DirectoryExclusion.ts
 │   ├── gitignoreService.ts
+│   ├── vscodeEmitterHost.ts
 │   └── enablementCancellation.ts
-├── test/
-│   └── kb.test.ts
-└── types/                  – (empty; reserved for shared type definitions)
+└── test/
+    └── kb.test.ts
 ```
 
 ### Known Issues
 
 | Issue | Severity | Status |
 |-------|----------|--------|
-| `kb.ts` is 4,000+ LOC mixing analysis and generation | Critical | Partially delegated to emitters |
+| `kb.ts` was 4,000+ LOC mixing analysis and generation | Critical | **Resolved** — gutted to ~544 lines; logic lives in core/emitters |
 | `state.ts` is a mutable singleton bag; hard to test | Medium | Open |
-| Legacy instruction/detection code duplicated with emitters | Low | Emitters are now canonical |
+| Legacy instruction/detection code duplicated with emitters | Low | **Resolved** — extension delegates to CLI/emitters |
 
 ## Current Architecture (multi-package)
 
 ```
-┌─────────────────────────────────┐
-│  extension/  (VS Code adapter:  │──▶ @aspectcode/core
-│  commands, lifecycle, watchers)  │──▶ @aspectcode/emitters
-├─────────────────────────────────┤
-│  packages/cli/                  │──▶ @aspectcode/core
-│  (Node CLI entry point)         │──▶ @aspectcode/emitters
-├─────────────────────────────────┤
-│  packages/emitters/             │──▶ @aspectcode/core
-│  (KB, instructions, manifest)   │
-├─────────────────────────────────┤
-│  packages/core/                 │   (zero external deps)
-│  (analysis, discovery, stats)   │
-└─────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  extension/  (VS Code thin wrapper)              │
+│  Commands, lifecycle, watchers, status bar        │──▶ @aspectcode/cli (subprocess)
+│  CLI-first with in-process fallback              │──▶ @aspectcode/core (fallback)
+│                                                  │──▶ @aspectcode/emitters (fallback)
+├──────────────────────────────────────────────────┤
+│  packages/cli/  (@aspectcode/cli)                │
+│  init, generate, watch, impact, deps list        │──▶ @aspectcode/core
+│                                                  │──▶ @aspectcode/emitters
+├──────────────────────────────────────────────────┤
+│  packages/emitters/  (@aspectcode/emitters)      │
+│  KB emitter, instructions emitter, manifest,     │──▶ @aspectcode/core
+│  transactions, report                            │
+├──────────────────────────────────────────────────┤
+│  packages/core/  (@aspectcode/core)              │
+│  analyzeRepo, analyzeRepoWithDependencies,       │   (zero external deps)
+│  discoverFiles, DependencyAnalyzer, parsers      │
+└──────────────────────────────────────────────────┘
 ```
 
 Packages that now exist and are functional:
-- **`@aspectcode/core`** — `analyzeRepo()`, `discoverFiles()`, `DependencyAnalyzer`, tree-sitter grammars
+- **`@aspectcode/core`** — `analyzeRepo()`, `analyzeRepoWithDependencies()`, `discoverFiles()`, `DependencyAnalyzer`, tree-sitter grammars
 - **`@aspectcode/emitters`** — `runEmitters()`, KB emitter, instructions emitter, manifest, transactions
-- **`@aspectcode/cli`** — `aspectcode init`, `aspectcode generate`, `aspectcode watch`, `aspectcode deps list`
+- **`@aspectcode/cli`** — `aspectcode init`, `aspectcode generate`, `aspectcode watch`, `aspectcode impact`, `aspectcode deps list`
 
-### Phase 4 Target
+### Phase 4 — In Progress
 
-The extension will shell out to `aspectcode generate --json` and render
-the result. The extension becomes a thin wrapper: lifecycle, commands,
-status bar.
+The extension now shells out to the CLI binary for KB generation, instruction
+emission, and impact analysis — falling back to in-process execution when the
+CLI is unavailable. Three operations use this pattern today:
+
+| Operation | CLI command | Fallback |
+|-----------|-------------|----------|
+| KB generation | `aspectcode generate --json --kb-only` | `analyzeRepoWithDependencies()` + `runEmitters()` |
+| Instructions | `aspectcode generate --json --copilot …` | `createInstructionsEmitter().emit()` |
+| Impact analysis | `aspectcode impact --file <path> --json` | `DependencyAnalyzer` in-process |
 
 ### CLI behavior baseline (must stay tested)
 
@@ -82,6 +97,11 @@ status bar.
 - `aspectcode generate --json` emits machine-readable write stats + connections.
 - `aspectcode generate --list-connections` prints dependency connections.
 - `aspectcode generate --json --file <path>` or `--list-connections --file <path>` filters connections to one workspace file.
+- `aspectcode generate --kb-only` generates KB artifacts only (skips instruction files).
+- `aspectcode generate --copilot --cursor --claude --other` selects which instruction files to emit.
+- `aspectcode generate --instructions-mode safe|permissive|off` controls instruction content mode.
+- `aspectcode impact --file <path>` computes dependency impact for a single file.
+- `aspectcode impact --file <path> --json` emits machine-readable impact JSON.
 - `aspectcode watch` runs as a long-lived watcher and regenerates by mode (`onChange`/`idle`/`manual`).
 - `aspectcode deps list` prints dependency connections without artifact generation, and supports `--file <path>` filtering.
 - Legacy config compatibility is preserved (`autoRegenerateKb` mapping).
@@ -92,8 +112,8 @@ All migration work should preserve this baseline through CLI tests first.
 
 These rules are checked by `npm run check:boundaries`:
 
-1. **`services/`** is the lowest layer in the current structure.
-  - `services/` must NOT import from `assistants/`,
+1. **`services/`** is the lowest layer in the extension.
+   - `services/` must NOT import from `assistants/`,
      `commandHandlers`, or `extension.ts`.
    - `services/` MAY import from other `services/` files.
 
@@ -155,10 +175,10 @@ All tests run offline. No network access required.
 
 | Package | Runner | Tests | Notes |
 |---------|--------|-------|-------|
-| `@aspectcode/core` | mocha + ts-node | 10 | Snapshot tests against fixture repo |
-| `@aspectcode/emitters` | mocha + ts-node | 78 | KB, instructions, manifest, transaction |
-| `@aspectcode/cli` | mocha + ts-node | 37 | parseArgs, config compatibility, init, generate, deps |
-| Extension | VS Code test harness | 1+ | `kb.test.ts` |
+| `@aspectcode/core` | mocha + ts-node | 11 | Snapshot tests against fixture repo |
+| `@aspectcode/emitters` | mocha + ts-node | 79 | KB, instructions, manifest, transaction |
+| `@aspectcode/cli` | mocha + ts-node | 49 | parseArgs, config, init, generate, deps, watch |
+| Extension | mocha + ts-node | 10 | KB invariant + shared analysis tests |
 
 Run all: `npm test --workspaces`
 

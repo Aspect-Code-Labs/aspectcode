@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-02-12T07:05:58.318Z",
+  "generatedAt": "2026-02-13T21:47:38.488Z",
   "generatorVersion": "0.0.1",
   "schemaVersion": "0.1",
   "stats": {
@@ -12,6 +12,6 @@
       "unknown": 3
     },
     "topHubs": [],
-    "totalLines": 17456
+    "totalLines": 6660
   }
 }

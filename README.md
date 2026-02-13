@@ -69,7 +69,7 @@ full architecture, data flow, and package API reference.
 ```bash
 npm install                     # install all workspace deps
 npm run build --workspaces      # build core → emitters → cli
-npm test --workspaces           # run all 115+ tests
+npm test --workspaces           # run all 149 tests
 ```
 
 ### Extension Development
@@ -86,7 +86,10 @@ npm run build
 node packages/cli/bin/aspectcode.js init         # create aspectcode.json
 node packages/cli/bin/aspectcode.js generate      # build KB artifacts
 node packages/cli/bin/aspectcode.js generate -v   # verbose output
+node packages/cli/bin/aspectcode.js generate --kb-only  # KB only, skip instructions
+node packages/cli/bin/aspectcode.js generate --copilot --cursor  # specific assistants
 node packages/cli/bin/aspectcode.js generate --list-connections --file src/app.ts
+node packages/cli/bin/aspectcode.js impact --file src/app.ts   # impact analysis
 node packages/cli/bin/aspectcode.js deps list --file src/app.ts
 node packages/cli/bin/aspectcode.js watch         # watch + regenerate on changes
 node packages/cli/bin/aspectcode.js watch --mode idle
@@ -98,7 +101,6 @@ node packages/cli/bin/aspectcode.js watch --mode idle
 |----------|---------|
 | [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | System architecture, package APIs, data flow |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Extension layering rules, file size limits |
-| [docs/OFFLINE-EDITING.md](docs/OFFLINE-EDITING.md) | Offline development guide, local LLM setup |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, PR process |
 
 ## Releases
