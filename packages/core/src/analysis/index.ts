@@ -5,15 +5,9 @@
 // Import parsers
 export type { ImportStatement, CallSite } from './importParsers';
 export {
-  analyzeFileImports,
-  analyzeFileCalls,
   calculateImportStrength,
   isLikelyExternalCall,
-  parsePythonImports,
-  parseJavaScriptImports,
-  parseJavaImports,
-  parseCSharpImports,
-  parseGoImports,
+  analyzeFileCalls,
 } from './importParsers';
 
 // Module resolver
@@ -25,5 +19,13 @@ export {
 } from './moduleResolver';
 
 // Analyzer
-export type { DependencyProgressCallback } from './analyzer';
+export type { DependencyProgressCallback, DependencyWarningCallback } from './analyzer';
 export { DependencyAnalyzer } from './analyzer';
+
+// Dependency adapter registry
+export type { DependencyLanguageAdapter } from './dependencyAdapters';
+export {
+  analyzeDependenciesForFile,
+  getDependencyAdapterForFile,
+  getRegisteredDependencyAdapters,
+} from './dependencyAdapters';

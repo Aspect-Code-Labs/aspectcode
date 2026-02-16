@@ -8,6 +8,41 @@ import Parser from 'web-tree-sitter';
 import type { ExtractedSymbol } from '../model';
 import { textFor } from './utils';
 
+// ── Import extraction ───────────────────────────────────────
+
+/**
+ * Extract C# import (using) module specifiers from source code.
+ */
+export function extractCSharpImports(lang: Parser.Language, code: string): string[] {
+  const parser = new Parser();
+  parser.setLanguage(lang);
+  const tree = parser.parse(code);
+  const root = tree.rootNode;
+  const out: string[] = [];
+
+  const walk = (n: Parser.SyntaxNode) => {
+    if (n.type === 'using_directive') {
+      const nameNode = n.namedChildren.find(
+        (ch) =>
+          ch.type === 'qualified_name' ||
+          ch.type === 'identifier' ||
+          ch.type === 'generic_name',
+      );
+      if (nameNode) {
+        out.push(textFor(code, nameNode));
+      }
+    }
+
+    for (const ch of n.namedChildren) {
+      walk(ch);
+    }
+  };
+
+  walk(root);
+  tree.delete();
+  return out;
+}
+
 // ── Symbol extraction ────────────────────────────────────────
 
 /**

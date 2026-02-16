@@ -8,6 +8,38 @@ import Parser from 'web-tree-sitter';
 import type { ExtractedSymbol } from '../model';
 import { textFor } from './utils';
 
+// ── Import extraction ───────────────────────────────────────
+
+/**
+ * Extract Java import module specifiers from source code.
+ */
+export function extractJavaImports(lang: Parser.Language, code: string): string[] {
+  const parser = new Parser();
+  parser.setLanguage(lang);
+  const tree = parser.parse(code);
+  const root = tree.rootNode;
+  const out: string[] = [];
+
+  const walk = (n: Parser.SyntaxNode) => {
+    if (n.type === 'import_declaration') {
+      const scoped = n.namedChildren.find((ch) => ch.type === 'scoped_identifier');
+      const identifier = n.namedChildren.find((ch) => ch.type === 'identifier');
+      const moduleNode = scoped ?? identifier;
+      if (moduleNode) {
+        out.push(textFor(code, moduleNode));
+      }
+    }
+
+    for (const ch of n.namedChildren) {
+      walk(ch);
+    }
+  };
+
+  walk(root);
+  tree.delete();
+  return out;
+}
+
 // ── Symbol extraction ────────────────────────────────────────
 
 /**

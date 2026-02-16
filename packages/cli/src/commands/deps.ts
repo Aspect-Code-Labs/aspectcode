@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { DependencyAnalyzer, discoverFiles } from '@aspectcode/core';
+import {
+  DependencyAnalyzer,
+  discoverFiles,
+  createNodeHostForWorkspace,
+} from '@aspectcode/core';
 import type { CliFlags, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import type { AspectCodeConfig } from '../config';
@@ -125,7 +129,8 @@ export async function collectConnections(
 
   const analyzer = new DependencyAnalyzer();
   analyzer.setFileContentsCache(cache);
-  const edges = await analyzer.analyzeDependencies(discoveredPaths);
+  const host = createNodeHostForWorkspace(root);
+  const edges = await analyzer.analyzeDependencies(discoveredPaths, host);
 
   return edges.map((edge) => ({
     source: path.relative(root, edge.source).replace(/\\/g, '/'),

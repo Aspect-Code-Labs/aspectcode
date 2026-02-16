@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-02-16T20:18:01.220Z",
+  "generatorVersion": "0.0.1",
+  "schemaVersion": "0.1",
+  "stats": {
+    "circularCount": 1,
+    "edgeCount": 40,
+    "fileCount": 27,
+    "languageCounts": {
+      "python": 1,
+      "typescript": 23,
+      "unknown": 3
+    },
+    "topHubs": [
+      {
+        "file": "extension/src/assistants/kb.ts",
+        "inDegree": 3,
+        "outDegree": 10
+      },
+      {
+        "file": "extension/src/commandHandlers.ts",
+        "inDegree": 1,
+        "outDegree": 9
+      },
+      {
+        "file": "extension/src/services/aspectSettings.ts",
+        "inDegree": 7,
+        "outDegree": 1
+      },
+      {
+        "file": "extension/src/extension.ts",
+        "inDegree": 0,
+        "outDegree": 7
+      },
+      {
+        "file": "extension/src/assistants/instructions.ts",
+        "inDegree": 1,
+        "outDegree": 4
+      },
+      {
+        "file": "extension/src/services/FileDiscoveryService.ts",
+        "inDegree": 4,
+        "outDegree": 1
+      },
+      {
+        "file": "extension/src/services/DirectoryExclusion.ts",
+        "inDegree": 3,
+        "outDegree": 1
+      },
+      {
+        "file": "extension/src/services/gitignoreService.ts",
+        "inDegree": 3,
+        "outDegree": 1
+      },
+      {
+        "file": "extension/src/services/WorkspaceFingerprint.ts",
+        "inDegree": 1,
+        "outDegree": 3
+      },
+      {
+        "file": "extension/src/state.ts",
+        "inDegree": 4,
+        "outDegree": 0
+      }
+    ],
+    "totalLines": 6637
+  }
+}

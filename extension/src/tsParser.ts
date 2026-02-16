@@ -1,20 +1,16 @@
 ﻿import * as vscode from 'vscode';
 import * as path from 'path';
-import { loadGrammars, createNodeHost } from '@aspectcode/core';
+import {
+  loadGrammars,
+  createNodeHost,
+  createEmptyGrammarSummary,
+} from '@aspectcode/core';
 import type { LoadedGrammars, GrammarSummary } from '@aspectcode/core';
 
 export type { LoadedGrammars };
 
 let initOnce: Promise<LoadedGrammars> | null = null;
-let grammarSummary: GrammarSummary = {
-  python: false,
-  typescript: false,
-  tsx: false,
-  javascript: false,
-  java: false,
-  csharp: false,
-  initFailed: false,
-};
+let grammarSummary: GrammarSummary = createEmptyGrammarSummary();
 
 /**
  * Load tree-sitter grammars once, caching the result.
@@ -67,13 +63,5 @@ export function getLoadedGrammarsSummary(): GrammarSummary {
 
 export function resetGrammarCache(): void {
   initOnce = null;
-  grammarSummary = {
-    python: false,
-    typescript: false,
-    tsx: false,
-    javascript: false,
-    java: false,
-    csharp: false,
-    initFailed: false,
-  };
+  grammarSummary = createEmptyGrammarSummary();
 }

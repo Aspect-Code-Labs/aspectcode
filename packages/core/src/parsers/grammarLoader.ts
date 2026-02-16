@@ -8,27 +8,18 @@
 
 import Parser from 'web-tree-sitter';
 import type { CoreHost } from '../host';
+import {
+  LANGUAGE_SPECS,
+  createEmptyGrammarSummary,
+} from './languages';
 
 // ── Types ────────────────────────────────────────────────────
 
-export type LoadedGrammars = {
-  python?: Parser.Language;
-  typescript?: Parser.Language;
-  tsx?: Parser.Language;
-  javascript?: Parser.Language;
-  java?: Parser.Language;
-  csharp?: Parser.Language;
-};
+export type LoadedGrammars = Partial<
+  Record<(typeof LANGUAGE_SPECS)[number]['id'], Parser.Language>
+>;
 
-export type GrammarSummary = {
-  python: boolean;
-  typescript: boolean;
-  tsx: boolean;
-  javascript: boolean;
-  java: boolean;
-  csharp: boolean;
-  initFailed: boolean;
-};
+export type GrammarSummary = ReturnType<typeof createEmptyGrammarSummary>;
 
 /** Optional logging callback used during grammar loading. */
 export type LogFn = (message: string) => void;
@@ -50,15 +41,7 @@ export async function loadGrammars(
   host: CoreHost,
   log?: LogFn,
 ): Promise<{ grammars: LoadedGrammars; summary: GrammarSummary }> {
-  const summary: GrammarSummary = {
-    python: false,
-    typescript: false,
-    tsx: false,
-    javascript: false,
-    java: false,
-    csharp: false,
-    initFailed: false,
-  };
+  const summary: GrammarSummary = createEmptyGrammarSummary();
 
   try {
     log?.('Tree-sitter: initializing WASM runtime...');
@@ -84,16 +67,8 @@ export async function loadGrammars(
   }
 
   const grammars: LoadedGrammars = {};
-  const langKeys: (keyof LoadedGrammars)[] = [
-    'python',
-    'typescript',
-    'tsx',
-    'javascript',
-    'java',
-    'csharp',
-  ];
-
-  for (const lang of langKeys) {
+  for (const spec of LANGUAGE_SPECS) {
+    const lang = spec.id;
     const grammarPath = host.wasmPaths.grammars[lang];
     if (!grammarPath) {
       log?.(`Tree-sitter: no grammar path for ${lang}, skipping`);

@@ -6,6 +6,15 @@
 export { loadGrammars } from './grammarLoader';
 export type { LoadedGrammars, GrammarSummary, LogFn } from './grammarLoader';
 
+// Language registry
+export {
+	LANGUAGE_SPECS,
+	createEmptyGrammarSummary,
+	getGrammarFileMap,
+	getSupportedSourceExtensions,
+} from './languages';
+export type { LanguageSpec, GrammarLanguageId } from './languages';
+
 // Shared utilities
 export { textFor } from './utils';
 
@@ -16,7 +25,7 @@ export { extractPythonImports, extractPythonSymbols } from './pythonExtractors';
 export { extractTSJSImports, extractTSJSSymbols } from './tsJsExtractors';
 
 // Java
-export { extractJavaSymbols } from './javaExtractors';
+export { extractJavaImports, extractJavaSymbols } from './javaExtractors';
 
 // C#
-export { extractCSharpSymbols } from './csharpExtractors';
+export { extractCSharpImports, extractCSharpSymbols } from './csharpExtractors';

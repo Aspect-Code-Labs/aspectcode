@@ -10,7 +10,7 @@ import * as path from 'path';
 import {
   discoverFiles,
   DependencyAnalyzer,
-  createNodeHost,
+  createNodeHostForWorkspace,
 } from '@aspectcode/core';
 import type { CliFlags, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
@@ -78,7 +78,7 @@ export async function runImpact(
   const spinAnalyze = createSpinner('Analyzing dependencies…', { quiet: flags.quiet });
   const analyzer = new DependencyAnalyzer();
   analyzer.setFileContentsCache(fileContents);
-  const host = createNodeHost(root);
+  const host = createNodeHostForWorkspace(root);
   const links = await analyzer.analyzeDependencies(discoveredPaths, host);
   spinAnalyze.stop(`Found ${links.length} dependency links`);
 

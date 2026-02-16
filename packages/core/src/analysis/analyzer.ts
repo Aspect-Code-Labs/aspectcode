@@ -9,10 +9,14 @@
 import type { CoreHost } from '../host';
 import type { GraphEdge } from '../model';
 import {
-  analyzeFileImports,
-  analyzeFileCalls,
   calculateImportStrength,
 } from './importParsers';
+import {
+  analyzeDependenciesForFile,
+  setDependencyAdapterGrammars,
+  type DependencyWarningLogger,
+} from './dependencyAdapters';
+import { loadGrammars } from '../parsers';
 import {
   buildFileIndex,
   resolveModulePathFast,
@@ -27,6 +31,13 @@ export type DependencyProgressCallback = (
   current: number,
   total: number,
   phase: string,
+) => void;
+
+export type DependencyWarningCallback = (
+  kind: 'grammar-missing' | 'tree-sitter-extract-failed',
+  language: string,
+  filePath: string,
+  message: string,
 ) => void;
 
 // ── Public API ───────────────────────────────────────────────
@@ -54,9 +65,18 @@ export class DependencyAnalyzer {
     files: string[],
     host?: CoreHost,
     onProgress?: DependencyProgressCallback,
+    onWarning?: DependencyWarningCallback,
   ): Promise<GraphEdge[]> {
     const links: GraphEdge[] = [];
     const linkIndex = new Map<string, GraphEdge>();
+    const seenWarnings = new Set<string>();
+
+    const warn: DependencyWarningLogger = (kind, language, filePath, message) => {
+      const key = `${kind}|${language}|${filePath}|${message}`;
+      if (seenWarnings.has(key)) return;
+      seenWarnings.add(key);
+      onWarning?.(kind, language, filePath, message);
+    };
 
     // Load file contents if not already cached
     if (this.workspaceFiles.size === 0 && host) {
@@ -67,6 +87,18 @@ export class DependencyAnalyzer {
     // Build indexes for fast resolution (O(N) once)
     onProgress?.(0, files.length, 'Building file index...');
     this.fileIndex = buildFileIndex(files);
+
+    // Initialize tree-sitter grammars when available through host.
+    if (host?.wasmPaths?.treeSitter && Object.keys(host.wasmPaths.grammars ?? {}).length > 0) {
+      try {
+        const loaded = await loadGrammars(host);
+        setDependencyAdapterGrammars(loaded.grammars);
+      } catch {
+        setDependencyAdapterGrammars({});
+      }
+    } else {
+      setDependencyAdapterGrammars({});
+    }
 
     // Analyze each file
     for (let i = 0; i < files.length; i++) {
@@ -83,8 +115,11 @@ export class DependencyAnalyzer {
       const content = this.workspaceFiles.get(file);
       if (!content) continue;
 
-      const fileDependencies = analyzeFileImports(file, content);
-      const fileCalls = analyzeFileCalls(file, content);
+      const { imports: fileDependencies, calls: fileCalls } = analyzeDependenciesForFile(
+        file,
+        content,
+        warn,
+      );
 
       // Convert imports to dependency links
       for (const imp of fileDependencies) {

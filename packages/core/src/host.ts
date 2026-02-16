@@ -7,6 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getGrammarFileMap } from './parsers/languages';
 
 /** I/O host that core delegates to for file reads and WASM paths. */
 export interface CoreHost {
@@ -24,18 +25,34 @@ export interface WasmPaths {
   grammars: Record<string, string>;
 }
 
+function hasTreeSitterRuntime(wasmDir: string): boolean {
+  return fs.existsSync(path.join(wasmDir, 'tree-sitter.wasm'));
+}
+
 /**
- * Standard language ids and their grammar filenames.
- * Used by `createNodeHost` to auto-discover grammars.
+ * Resolve a likely wasm directory for a workspace.
+ *
+ * Search order favors workspace-local parser bundles, then common
+ * repo-relative paths used in this monorepo.
  */
-const GRAMMAR_FILES: Record<string, string> = {
-  python: 'python.wasm',
-  typescript: 'typescript.wasm',
-  tsx: 'tsx.wasm',
-  javascript: 'javascript.wasm',
-  java: 'java.wasm',
-  csharp: 'c_sharp.wasm',
-};
+export function resolveWasmDirForWorkspace(workspaceRoot: string): string | undefined {
+  const candidates = [
+    path.join(workspaceRoot, 'parsers'),
+    path.join(workspaceRoot, 'extension', 'parsers'),
+    path.join(process.cwd(), 'parsers'),
+    path.join(process.cwd(), 'extension', 'parsers'),
+    path.resolve(__dirname, '../../../extension/parsers'),
+    path.resolve(__dirname, '../../../../extension/parsers'),
+  ];
+
+  for (const candidate of candidates) {
+    if (hasTreeSitterRuntime(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * Create a CoreHost backed by Node.js `fs` APIs.
@@ -43,8 +60,9 @@ const GRAMMAR_FILES: Record<string, string> = {
  * @param wasmDir  Directory containing tree-sitter.wasm and language grammars
  */
 export function createNodeHost(wasmDir: string): CoreHost {
+  const grammarFiles = getGrammarFileMap();
   const grammars: Record<string, string> = {};
-  for (const [lang, filename] of Object.entries(GRAMMAR_FILES)) {
+  for (const [lang, filename] of Object.entries(grammarFiles)) {
     const p = path.join(wasmDir, filename);
     if (fs.existsSync(p)) {
       grammars[lang] = p;
@@ -58,4 +76,18 @@ export function createNodeHost(wasmDir: string): CoreHost {
       grammars,
     },
   };
+}
+
+/**
+ * Create a Node host for a workspace by auto-resolving a wasm directory.
+ * Returns undefined when no runtime bundle can be found.
+ */
+export function createNodeHostForWorkspace(
+  workspaceRoot: string,
+): CoreHost | undefined {
+  const wasmDir = resolveWasmDirForWorkspace(workspaceRoot);
+  if (!wasmDir) {
+    return undefined;
+  }
+  return createNodeHost(wasmDir);
 }

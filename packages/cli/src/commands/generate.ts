@@ -1,14 +1,15 @@
 /**
  * `aspectcode generate` — discover, analyze, and emit artifacts.
  *
- * Pipeline: discoverFiles → readAll → analyzeRepo → runEmitters → report
+ * Pipeline: discoverFiles → readAll → analyzeRepoWithDependencies → runEmitters → report
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import {
   discoverFiles,
-  analyzeRepo,
+  analyzeRepoWithDependencies,
+  createNodeHostForWorkspace,
 } from '@aspectcode/core';
 import {
   createNodeEmitterHost,
@@ -55,11 +56,13 @@ export async function runGenerate(
   // ── 3. Read file contents ─────────────────────────────────
   const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: flags.quiet });
   const fileContents = new Map<string, string>();
+  const absoluteFileContents = new Map<string, string>();
   for (const abs of discoveredPaths) {
     const rel = path.relative(root, abs).replace(/\\/g, '/');
     try {
       const content = fs.readFileSync(abs, 'utf-8');
       fileContents.set(rel, content);
+      absoluteFileContents.set(abs, content);
     } catch {
       log.debug(`  skip (unreadable): ${rel}`);
     }
@@ -68,7 +71,13 @@ export async function runGenerate(
 
   // ── 4. Analyze ────────────────────────────────────────────
   const spinAnalyze = createSpinner('Analyzing…', { quiet: flags.quiet });
-  const model = analyzeRepo(root, fileContents);
+  const analysisHost = createNodeHostForWorkspace(root);
+  const model = await analyzeRepoWithDependencies(
+    root,
+    fileContents,
+    absoluteFileContents,
+    analysisHost,
+  );
   spinAnalyze.stop(
     `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
   );

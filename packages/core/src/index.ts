@@ -25,7 +25,11 @@ export type {
 } from './model';
 
 export type { CoreHost, WasmPaths } from './host';
-export { createNodeHost } from './host';
+export {
+  createNodeHost,
+  createNodeHostForWorkspace,
+  resolveWasmDirForWorkspace,
+} from './host';
 
 // ── Re-exports: paths ────────────────────────────────────────
 
@@ -72,19 +76,23 @@ export type { LoadedGrammars, GrammarSummary, LogFn } from './parsers/index';
 
 export {
   DependencyAnalyzer,
-  analyzeFileImports,
   analyzeFileCalls,
   calculateImportStrength,
   isLikelyExternalCall,
+  analyzeDependenciesForFile,
+  getDependencyAdapterForFile,
+  getRegisteredDependencyAdapters,
   buildFileIndex,
   resolveModulePathFast,
   resolveCallTargetFast,
 } from './analysis/index';
 export type {
   DependencyProgressCallback,
+  DependencyWarningCallback,
   ImportStatement,
   CallSite,
   FileIndex,
+  DependencyLanguageAdapter,
 } from './analysis/index';
 
 // ── Backward-compat alias ────────────────────────────────────
@@ -92,6 +100,7 @@ export type {
 import type { AnalysisModel, AnalyzedFile } from './model';
 import { toPosix } from './paths';
 import { DependencyAnalyzer } from './analysis/index';
+import { createNodeHostForWorkspace, type CoreHost } from './host';
 
 /**
  * @deprecated Use `AnalysisModel` instead.
@@ -151,6 +160,7 @@ export async function analyzeRepoWithDependencies(
   rootDir: string,
   relativeFiles: Map<string, string>,
   absoluteFiles: Map<string, string>,
+  host?: CoreHost,
 ): Promise<AnalysisModel> {
   const model = analyzeRepo(rootDir, relativeFiles);
   if (absoluteFiles.size === 0) {
@@ -160,7 +170,8 @@ export async function analyzeRepoWithDependencies(
   const analyzer = new DependencyAnalyzer();
   analyzer.setFileContentsCache(absoluteFiles);
   const absolutePaths = Array.from(absoluteFiles.keys());
-  const absoluteEdges = await analyzer.analyzeDependencies(absolutePaths);
+  const resolvedHost = host ?? createNodeHostForWorkspace(rootDir);
+  const absoluteEdges = await analyzer.analyzeDependencies(absolutePaths, resolvedHost);
 
   const toRel = (p: string): string => toPosix(path.relative(rootDir, p));
   const edges = absoluteEdges.map((edge) => ({

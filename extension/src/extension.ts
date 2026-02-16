@@ -275,11 +275,12 @@ export async function activate(context: vscode.ExtensionContext) {
   loadGrammarsOnce(context, outputChannel)
     .then(() => {
       const summary = getLoadedGrammarsSummary();
-      const statusParts = [];
-      statusParts.push(`python=${summary.python ? 'OK' : 'MISSING'}`);
-      statusParts.push(`typescript=${summary.typescript ? 'OK' : 'MISSING'}`);
-      statusParts.push(`tsx=${summary.tsx ? 'OK' : 'MISSING'}`);
-      statusParts.push(`javascript=${summary.javascript ? 'OK' : 'MISSING'}`);
+      const statusParts = Object.entries(summary)
+        .filter(([lang]) => lang !== 'initFailed')
+        .map(([lang, ok]) => `${lang}=${ok ? 'OK' : 'MISSING'}`);
+      if (summary.initFailed) {
+        statusParts.unshift('init=FAILED');
+      }
       outputChannel.appendLine(`Tree-sitter loaded: ${statusParts.join(' ')}`);
     })
     .catch((error) => {
