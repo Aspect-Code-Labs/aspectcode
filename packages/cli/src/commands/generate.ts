@@ -19,7 +19,7 @@ import type { CliFlags, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import type { AspectCodeConfig } from '../config';
 import type { Logger } from '../logger';
-import { fmt } from '../logger';
+import { fmt, createSpinner } from '../logger';
 import { collectConnections, filterConnectionsByFile } from './deps';
 
 export async function runGenerate(
@@ -35,41 +35,42 @@ export async function runGenerate(
   const resolvedOut = outDir ? path.resolve(root, outDir) : root;
   const exclude = config?.exclude;
 
-  log.info(`Workspace: ${fmt.cyan(root)}`);
-  if (outDir) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
-  log.blank();
+  if (!flags.json) {
+    log.info(`Workspace: ${fmt.cyan(root)}`);
+    if (outDir) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
+    log.blank();
+  }
 
   // ── 2. Discover files ─────────────────────────────────────
-  log.debug('Discovering files…');
+  const spin = createSpinner('Discovering files…', { quiet: flags.quiet });
   const discoveredPaths = await discoverFiles(root, exclude ? { exclude } : undefined);
 
   if (discoveredPaths.length === 0) {
-    log.warn('No source files found. Check your exclude patterns.');
+    spin.fail('No source files found');
+    log.warn('Check your exclude patterns.');
     return { exitCode: ExitCode.ERROR };
   }
-  log.info(`Found ${fmt.bold(String(discoveredPaths.length))} source files`);
+  spin.stop(`Discovered ${discoveredPaths.length} files`);
 
   // ── 3. Read file contents ─────────────────────────────────
-  log.debug('Reading file contents…');
+  const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: flags.quiet });
   const fileContents = new Map<string, string>();
-    // const absFileContents = new Map<string, string>();
   for (const abs of discoveredPaths) {
     const rel = path.relative(root, abs).replace(/\\/g, '/');
     try {
       const content = fs.readFileSync(abs, 'utf-8');
       fileContents.set(rel, content);
-        // absFileContents.set(abs, content);
     } catch {
       log.debug(`  skip (unreadable): ${rel}`);
     }
   }
+  spinRead.stop(`Read ${fileContents.size} files`);
 
   // ── 4. Analyze ────────────────────────────────────────────
-  log.debug('Analyzing repository…');
-    const model = analyzeRepo(root, fileContents);
-  log.info(
-    `Analyzed: ${fmt.bold(String(model.files.length))} files, ` +
-    `${fmt.bold(String(model.graph.edges.length))} edges`,
+  const spinAnalyze = createSpinner('Analyzing…', { quiet: flags.quiet });
+  const model = analyzeRepo(root, fileContents);
+  spinAnalyze.stop(
+    `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
   );
 
   // ── 5. Resolve instruction target ─────────────────────────
@@ -92,16 +93,15 @@ export async function runGenerate(
     ? 'off'
     : (flags.instructionsMode ?? 'safe');
 
-  if (!flags.kbOnly) {
+  if (!flags.kbOnly && !flags.json) {
     const targets = Object.entries(assistants)
       .filter(([, v]) => v)
       .map(([k]) => k);
-    log.info(`Instructions target: ${fmt.cyan(targets.join(', ') || '(none)')}`);
+    log.info(`Instructions: ${fmt.cyan(targets.join(', ') || '(none)')}`);
   }
 
   // ── 6. Emit artifacts ─────────────────────────────────────
-  log.blank();
-  log.debug('Emitting artifacts…');
+  const spinEmit = createSpinner('Writing artifacts…', { quiet: flags.quiet });
 
   const emitOpts: EmitOptions = {
     workspaceRoot: root,
@@ -112,22 +112,26 @@ export async function runGenerate(
   };
 
   const report = await runEmitters(model, host, emitOpts);
+  spinEmit.stop(`Wrote ${report.wrote.length} files`);
 
   let connections: Awaited<ReturnType<typeof collectConnections>> | undefined;
   if (flags.listConnections || flags.json) {
+    const spinDeps = createSpinner('Computing dependencies…', { quiet: flags.quiet });
     const allConnections = await collectConnections(root, config, log);
     const filtered = filterConnectionsByFile(allConnections, root, flags.file);
 
     if (filtered.error) {
+      spinDeps.fail('Dependency error');
       log.error(filtered.error);
       return { exitCode: ExitCode.USAGE };
     }
 
-    if (filtered.fileFilter && !flags.json) {
-      log.info(`Filtering dependency connections by file: ${fmt.cyan(filtered.fileFilter)}`);
-    }
-
     connections = filtered.connections;
+    spinDeps.stop(`Found ${connections.length} connections`);
+
+    if (filtered.fileFilter && !flags.json) {
+      log.info(`Filtered by: ${fmt.cyan(filtered.fileFilter)}`);
+    }
   }
 
   // ── 7. Report ─────────────────────────────────────────────
@@ -146,6 +150,7 @@ export async function runGenerate(
     };
     console.log(JSON.stringify(payload, null, 2));
   } else {
+    log.blank();
     for (const w of report.wrote) {
       const rel = path.relative(root, w.path).replace(/\\/g, '/');
       log.success(`${rel} (${formatBytes(w.bytes)})`);
@@ -167,7 +172,7 @@ export async function runGenerate(
       const bidi = row.bidirectional ? ' <->' : '';
       log.info(
         `${fmt.cyan(row.source)} -> ${fmt.cyan(row.target)} ` +
-          `(${row.type}, ${row.strength.toFixed(2)})${bidi}${symbols}${lineInfo}`,
+          `(${row.type})${bidi}${symbols}${lineInfo}`,
       );
     }
   }

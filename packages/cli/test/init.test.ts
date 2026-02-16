@@ -17,6 +17,7 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     version: false,
     verbose: false,
     quiet: true, // suppress output in tests
+    noColor: false,
     listConnections: false,
     json: false,
     force: false,
@@ -31,13 +32,34 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
 
 describe('init command', () => {
   let tmpDir: string;
+  let stdinIsTtyDescriptor: PropertyDescriptor | undefined;
+  let stdoutIsTtyDescriptor: PropertyDescriptor | undefined;
   const log = createLogger({ quiet: true });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-init-'));
+
+    stdinIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    stdoutIsTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: false,
+      configurable: true,
+    });
+    Object.defineProperty(process.stdout, 'isTTY', {
+      value: false,
+      configurable: true,
+    });
   });
 
   afterEach(() => {
+    if (stdinIsTtyDescriptor) {
+      Object.defineProperty(process.stdin, 'isTTY', stdinIsTtyDescriptor);
+    }
+    if (stdoutIsTtyDescriptor) {
+      Object.defineProperty(process.stdout, 'isTTY', stdoutIsTtyDescriptor);
+    }
+
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -76,5 +98,31 @@ describe('init command', () => {
     const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     assert.equal(parsed.custom, undefined);
     assert.equal(parsed.updateRate, 'onChange');
+  });
+
+  it('non-interactive path writes defaults and does not start watch', async () => {
+    let watchCalls = 0;
+
+    const result = await runInit(
+      tmpDir,
+      makeFlags({ quiet: false }),
+      log,
+      {
+        runWatchFn: async () => {
+          watchCalls++;
+          return { exitCode: 0 };
+        },
+      },
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(watchCalls, 0);
+
+    const cfgPath = path.join(tmpDir, CONFIG_FILE_NAME);
+    const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    assert.equal(parsed.instructionsMode, 'safe');
+    assert.equal(parsed.updateRate, 'onChange');
+    assert.equal(parsed.outDir, undefined);
+    assert.equal(parsed.exclude, undefined);
   });
 });

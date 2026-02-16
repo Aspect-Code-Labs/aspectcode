@@ -1,14 +1,26 @@
 {
   "name": "@aspectcode/core",
   "version": "0.0.1",
-  "private": true,
   "description": "Pure-logic core for Aspect Code — no VS Code dependency",
+  "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicobailey/aspectcode.git",
+    "directory": "packages/core"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'",
     "test:snapshot": "mocha --require ts-node/register 'test/snapshot.test.ts'"
   },

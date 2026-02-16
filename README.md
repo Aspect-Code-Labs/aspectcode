@@ -93,6 +93,12 @@ node packages/cli/bin/aspectcode.js impact --file src/app.ts   # impact analysis
 node packages/cli/bin/aspectcode.js deps list --file src/app.ts
 node packages/cli/bin/aspectcode.js watch         # watch + regenerate on changes
 node packages/cli/bin/aspectcode.js watch --mode idle
+node packages/cli/bin/aspectcode.js show-config
+node packages/cli/bin/aspectcode.js set-update-rate idle
+node packages/cli/bin/aspectcode.js set-out-dir .aspect
+node packages/cli/bin/aspectcode.js clear-out-dir
+node packages/cli/bin/aspectcode.js add-exclude dist
+node packages/cli/bin/aspectcode.js remove-exclude dist
 ```
 
 ## Key Documentation

@@ -78,6 +78,22 @@ describe('parseArgs', () => {
     assert.equal(r.command, 'watch');
   });
 
+  it('parses settings command names', () => {
+    const commands = [
+      'show-config',
+      'set-update-rate',
+      'set-out-dir',
+      'clear-out-dir',
+      'add-exclude',
+      'remove-exclude',
+    ];
+
+    for (const command of commands) {
+      const r = parseArgs([...base, command]);
+      assert.equal(r.command, command);
+    }
+  });
+
   it('parses --mode with separate value', () => {
     const r = parseArgs([...base, 'watch', '--mode', 'idle']);
     assert.equal(r.flags.mode, 'idle');
@@ -105,9 +121,25 @@ describe('parseArgs', () => {
     assert.equal(r.flags.quiet, true);
   });
 
-  it('ignores unknown flags', () => {
+  it('warns on unknown flags', () => {
     const r = parseArgs([...base, 'generate', '--future-flag']);
     assert.equal(r.command, 'generate');
+  });
+
+  it('parses gen alias as generate', () => {
+    const r = parseArgs([...base, 'gen']);
+    assert.equal(r.command, 'gen');
+  });
+
+  it('parses g alias as generate', () => {
+    const r = parseArgs([...base, 'g', '--json']);
+    assert.equal(r.command, 'g');
+    assert.equal(r.flags.json, true);
+  });
+
+  it('parses --no-color', () => {
+    const r = parseArgs([...base, 'generate', '--no-color']);
+    assert.equal(r.flags.noColor, true);
   });
 
   it('collects positionals after command', () => {

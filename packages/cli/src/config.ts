@@ -25,6 +25,8 @@ export interface AspectCodeConfig {
   exclude?: string[];
 }
 
+export type RawAspectCodeConfig = Record<string, unknown>;
+
 /** Default config written by `aspectcode init`. */
 export function defaultConfig(): AspectCodeConfig {
   return {
@@ -65,6 +67,38 @@ export function loadConfig(root: string): AspectCodeConfig | undefined {
   } catch {
     throw new Error(`Failed to parse ${CONFIG_FILE_NAME}: invalid JSON`);
   }
+}
+
+/**
+ * Load raw `aspectcode.json` object from `root`.
+ * Returns `undefined` if not found.
+ */
+export function loadRawConfig(root: string): RawAspectCodeConfig | undefined {
+  const filePath = path.join(root, CONFIG_FILE_NAME);
+  if (!fs.existsSync(filePath)) return undefined;
+
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Failed to parse ${CONFIG_FILE_NAME}: invalid JSON`);
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Failed to parse ${CONFIG_FILE_NAME}: expected JSON object`);
+  }
+
+  return parsed as RawAspectCodeConfig;
+}
+
+/**
+ * Save raw config object to `aspectcode.json`.
+ */
+export function saveRawConfig(root: string, config: RawAspectCodeConfig): void {
+  const filePath = configPath(root);
+  const content = JSON.stringify(config, null, 2) + '\n';
+  fs.writeFileSync(filePath, content, 'utf-8');
 }
 
 /** Resolve the config file path for a given root. */

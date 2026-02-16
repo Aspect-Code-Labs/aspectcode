@@ -302,7 +302,6 @@ export type ImpactSummary = {
   file: string;
   dependents_count: number;
   top_dependents: Array<{ file: string; dependent_count: number }>;
-  hub_risk: 'LOW' | 'MEDIUM' | 'HIGH';
   generated_at: string;
 };
 
@@ -358,7 +357,6 @@ async function computeImpactSummaryInProcess(
         file: makeRelativePath(normalizedTarget, workspaceRoot.fsPath),
         dependents_count: 0,
         top_dependents: [],
-        hub_risk: 'LOW',
         generated_at: new Date().toISOString(),
       };
     }
@@ -387,23 +385,16 @@ async function computeImpactSummaryInProcess(
       .sort((a, b) => b.dependent_count - a.dependent_count || a.abs.localeCompare(b.abs));
 
     const dependentsCount = dependentsWithCounts.length;
-    const hubRisk: ImpactSummary['hub_risk'] =
-      dependentsCount >= 5 ? 'HIGH' : dependentsCount >= 3 ? 'MEDIUM' : 'LOW';
 
     const topDependents = dependentsWithCounts.slice(0, 5).map((d) => ({
       file: makeRelativePath(d.abs, workspaceRoot.fsPath),
       dependent_count: d.dependent_count,
     }));
 
-    // If the target is itself a test file, keep the risk conservative.
-    const hubRiskAdjusted: ImpactSummary['hub_risk'] =
-      targetClass === 'test' && hubRisk === 'HIGH' ? 'MEDIUM' : hubRisk;
-
     return {
       file: makeRelativePath(normalizedTarget, workspaceRoot.fsPath),
       dependents_count: dependentsCount,
       top_dependents: topDependents,
-      hub_risk: hubRiskAdjusted,
       generated_at: new Date().toISOString(),
     };
   } catch (e) {

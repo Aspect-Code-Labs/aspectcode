@@ -8,13 +8,21 @@ import * as path from 'path';
 import type { CliArgs, CliFlags, CommandResult } from './cli';
 import { ExitCode } from './cli';
 import { loadConfig } from './config';
-import { createLogger, fmt } from './logger';
+import { createLogger, disableColor, fmt } from './logger';
 import { getVersion } from './version';
 import { runInit } from './commands/init';
 import { runGenerate } from './commands/generate';
 import { runDepsList } from './commands/deps';
 import { runWatch } from './commands/watch';
 import { runImpact } from './commands/impact';
+import {
+  runAddExclude,
+  runClearOutDir,
+  runRemoveExclude,
+  runSetOutDir,
+  runSetUpdateRate,
+  runShowConfig,
+} from './commands/settings';
 
 // ── Argv parsing ─────────────────────────────────────────────
 
@@ -32,6 +40,7 @@ export function parseArgs(argv: string[]): CliArgs {
     cursor: false,
     claude: false,
     other: false,
+    noColor: false,
   };
   const positionals: string[] = [];
   let command = '';
@@ -98,8 +107,14 @@ export function parseArgs(argv: string[]): CliArgs {
       if (v === 'safe' || v === 'permissive' || v === 'off') {
         flags.instructionsMode = v;
       }
+    } else if (arg === '--no-color') {
+      flags.noColor = true;
     } else if (arg.startsWith('-')) {
-      // Unknown flag — ignore for forward compat
+      // Unknown flag — warn but keep going for forward compat
+      const stderr = process.stderr;
+      if (stderr && typeof stderr.write === 'function') {
+        stderr.write(`Warning: unknown flag ${arg}\n`);
+      }
     } else if (!command) {
       command = arg;
     } else {
@@ -122,25 +137,32 @@ ${fmt.bold('USAGE')}
   aspectcode <command> [options]
 
 ${fmt.bold('COMMANDS')}
-  init        Create an ${fmt.cyan('aspectcode.json')} config file
-  generate    Discover, analyze, and emit KB artifacts (+ ${fmt.cyan('AGENTS.md')})
-  watch       Watch source files and regenerate on changes
-  impact      Compute impact analysis for a file
-  deps list   List dependency connections
+  init                     Create an ${fmt.cyan('aspectcode.json')} config file
+  generate  ${fmt.dim('(gen, g)')}       Discover, analyze, and emit KB artifacts
+  watch                    Watch source files and regenerate on changes
+  impact                   Compute impact analysis for a file
+  deps list                List dependency connections
+  show-config              Show current ${fmt.cyan('aspectcode.json')} values
+  set-update-rate <mode>   Set updateRate to manual|onChange|idle
+  set-out-dir <path>       Set outDir
+  clear-out-dir            Remove outDir
+  add-exclude <path>       Add an exclude path
+  remove-exclude <path>    Remove an exclude path
 
 ${fmt.bold('OPTIONS')}
   -r, --root <path>          Workspace root (default: cwd)
   -o, --out <path>           Output directory override
       --list-connections     Print dependency connections
       --json                 Print JSON output (for automation)
-      --file <path>          Filter dependency connection output to one workspace file
-      --mode <mode>          Watch mode override: manual|onChange|idle
+      --file <path>          Filter by file path
+      --mode <mode>          Watch mode: manual|onChange|idle
       --kb-only              Generate KB artifacts only (skip instruction files)
       --copilot              Enable Copilot instruction file
       --cursor               Enable Cursor instruction file
       --claude               Enable Claude instruction file
       --other                Enable AGENTS.md instruction file
       --instructions-mode <m>  Instruction mode: safe|permissive|off
+      --no-color             Disable colored output
   -f, --force                Overwrite existing config (init)
   -v, --verbose              Show debug output
   -q, --quiet                Suppress non-error output
@@ -150,14 +172,11 @@ ${fmt.bold('OPTIONS')}
 ${fmt.bold('EXAMPLES')}
   aspectcode init
   aspectcode generate
-  aspectcode generate --list-connections
-  aspectcode generate --json
-  aspectcode generate --json --file src/app.ts
-  aspectcode watch
-  aspectcode watch --mode idle
-  aspectcode deps list
+  aspectcode gen --copilot --cursor
+  aspectcode g --json
+  aspectcode impact --file src/app.ts
   aspectcode deps list --file src/app.ts
-  aspectcode generate -o build/kb
+  aspectcode watch --mode idle
 `.trimStart());
 }
 
@@ -186,6 +205,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Apply --no-color before any output
+  if (flags.noColor) {
+    disableColor();
+  }
+
   const log = createLogger({ verbose: flags.verbose, quiet: flags.quiet });
   const root = path.resolve(flags.root ?? process.cwd());
 
@@ -196,7 +220,9 @@ async function main(): Promise<void> {
       result = await runInit(root, flags, log);
       break;
 
-    case 'generate': {
+    case 'generate':
+    case 'gen':
+    case 'g': {
       const config = loadConfig(root);
       result = await runGenerate(root, flags, config, log);
       break;
@@ -223,6 +249,40 @@ async function main(): Promise<void> {
     case 'impact': {
       const config = loadConfig(root);
       result = await runImpact(root, flags, config, log);
+      break;
+    }
+
+    case 'show-config': {
+      result = await runShowConfig(root, flags, log);
+      break;
+    }
+
+    case 'set-update-rate': {
+      const value = parsed.positionals[0] ?? '';
+      result = await runSetUpdateRate(root, flags, log, value);
+      break;
+    }
+
+    case 'set-out-dir': {
+      const value = parsed.positionals[0] ?? '';
+      result = await runSetOutDir(root, flags, log, value);
+      break;
+    }
+
+    case 'clear-out-dir': {
+      result = await runClearOutDir(root, flags, log);
+      break;
+    }
+
+    case 'add-exclude': {
+      const value = parsed.positionals[0] ?? '';
+      result = await runAddExclude(root, flags, log, value);
+      break;
+    }
+
+    case 'remove-exclude': {
+      const value = parsed.positionals[0] ?? '';
+      result = await runRemoveExclude(root, flags, log, value);
       break;
     }
 

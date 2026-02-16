@@ -1,4 +1,8 @@
 {
   "private": true,
-  "workspaces": ["extension", "packages/*"]
+  "workspaces": ["extension", "packages/*"],
+  "scripts": {
+    "test:checklist": "powershell -ExecutionPolicy Bypass -File ./scripts/test-aspectcode.ps1",
+    "test:checklist:fast": "powershell -ExecutionPolicy Bypass -File ./scripts/test-aspectcode.ps1 -SkipInstall -SkipBuild"
+  }
 }

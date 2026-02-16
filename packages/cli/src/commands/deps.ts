@@ -5,13 +5,12 @@ import type { CliFlags, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import type { AspectCodeConfig } from '../config';
 import type { Logger } from '../logger';
-import { fmt } from '../logger';
+import { fmt, createSpinner } from '../logger';
 
 export interface DependencyConnection {
   source: string;
   target: string;
   type: string;
-  strength: number;
   symbols: string[];
   lines: number[];
   bidirectional: boolean;
@@ -59,7 +58,7 @@ export async function runDepsList(
     const bidi = row.bidirectional ? ' <->' : '';
     log.info(
       `${fmt.cyan(row.source)} -> ${fmt.cyan(row.target)} ` +
-        `(${row.type}, ${row.strength.toFixed(2)})${bidi}${symbols}${lineInfo}`,
+        `(${row.type})${bidi}${symbols}${lineInfo}`,
     );
   }
 
@@ -107,10 +106,13 @@ export async function collectConnections(
   config: AspectCodeConfig | undefined,
   log: Logger,
 ): Promise<DependencyConnection[]> {
+  const spin = createSpinner('Discovering files…', { quiet: true });
   const discoveredPaths = await discoverFiles(root, config?.exclude ? { exclude: config.exclude } : undefined);
   if (discoveredPaths.length === 0) {
+    spin.stop('No files found');
     return [];
   }
+  spin.stop(`Found ${discoveredPaths.length} files`);
 
   const cache = new Map<string, string>();
   for (const abs of discoveredPaths) {
@@ -129,7 +131,6 @@ export async function collectConnections(
     source: path.relative(root, edge.source).replace(/\\/g, '/'),
     target: path.relative(root, edge.target).replace(/\\/g, '/'),
     type: edge.type,
-    strength: edge.strength,
     symbols: edge.symbols,
     lines: edge.lines,
     bidirectional: edge.bidirectional,

@@ -24,6 +24,7 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     cursor: false,
     claude: false,
     other: false,
+    noColor: false,
     ...overrides,
   };
 }

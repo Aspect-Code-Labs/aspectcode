@@ -53,6 +53,9 @@ export interface CliFlags {
 
   /** --instructions-mode: instruction generation mode. */
   instructionsMode?: 'safe' | 'permissive' | 'off';
+
+  /** --no-color: disable ANSI color output. */
+  noColor: boolean;
 }
 
 /** Exit codes. */

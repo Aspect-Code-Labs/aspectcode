@@ -41,7 +41,6 @@ export interface GenerateJsonPayload {
     source: string;
     target: string;
     type: string;
-    strength: number;
     bidirectional: boolean;
     symbols: string[];
     lines: number[];
@@ -53,7 +52,6 @@ export interface ImpactJsonPayload {
   file: string;
   dependents_count: number;
   top_dependents: Array<{ file: string; dependent_count: number }>;
-  hub_risk: 'LOW' | 'MEDIUM' | 'HIGH';
   generated_at: string;
 }
 

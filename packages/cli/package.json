@@ -1,8 +1,8 @@
 {
   "name": "@aspectcode/cli",
   "version": "0.0.1",
-  "private": true,
   "description": "CLI for Aspect Code — generate knowledge-base artifacts from the command line",
+  "license": "MIT",
   "main": "dist/main.js",
   "types": "dist/main.d.ts",
   "bin": {
@@ -13,14 +13,34 @@
     "bin",
     "dist"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "aspectcode",
+    "knowledge-base",
+    "ai",
+    "copilot",
+    "cursor",
+    "claude",
+    "code-analysis",
+    "static-analysis",
+    "dependency-graph"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicobailey/aspectcode.git",
+    "directory": "packages/cli"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@aspectcode/core": "*",
-    "@aspectcode/emitters": "*",
+    "@aspectcode/core": "0.0.1",
+    "@aspectcode/emitters": "0.0.1",
     "chokidar": "^4.0.3"
   },
   "devDependencies": {

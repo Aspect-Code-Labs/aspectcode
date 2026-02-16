@@ -1,18 +1,30 @@
 {
   "name": "@aspectcode/emitters",
   "version": "0.0.1",
-  "private": true,
   "description": "Artifact emitters for Aspect Code — KB, instructions, manifest",
+  "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": ["dist"],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicobailey/aspectcode.git",
+    "directory": "packages/emitters"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@aspectcode/core": "*"
+    "@aspectcode/core": "0.0.1"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",

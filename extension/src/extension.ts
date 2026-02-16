@@ -253,7 +253,6 @@ export async function activate(context: vscode.ExtensionContext) {
       lines.push('Aspect Code — Impact Analysis');
       lines.push(`File: ${summary.file}`);
       lines.push(`Dependents: ${summary.dependents_count}`);
-      lines.push(`Hub risk: ${summary.hub_risk}`);
       if (summary.top_dependents.length > 0) {
         lines.push('Top dependents:');
         for (const dep of summary.top_dependents) {

@@ -107,6 +107,10 @@ No external command framework — hand-rolled argv parser.
 | `aspectcode watch` | Watch files and trigger `generate` by mode | long-running process |
 | `aspectcode impact` | Compute dependency impact for a single file | human-readable by default, JSON with `--json` |
 | `aspectcode deps list` | Compute and list dependency connections only | human-readable; supports `--file` filter |
+| `aspectcode show-config` | Print current `aspectcode.json` values | human-readable by default, JSON with `--json` |
+| `aspectcode set-update-rate` | Set canonical `updateRate` and remove legacy key | human-readable by default, JSON with `--json` |
+| `aspectcode set-out-dir` / `clear-out-dir` | Set or clear `outDir` | human-readable by default, JSON with `--json` |
+| `aspectcode add-exclude` / `remove-exclude` | Add or remove entries in `exclude` | human-readable by default, JSON with `--json` |
 
 Key flags:
 - Global-ish: `--root`, `--verbose`, `--quiet`, `--help`, `--version`
@@ -115,6 +119,7 @@ Key flags:
 - `impact`: `--file` (required), `--json`
 - `deps list`: `--file` (connection filtering)
 - `watch`: `--mode` (`manual|onChange|idle`)
+- settings commands: positional value where required, `--json`
 
 Config file: `aspectcode.json`.
 

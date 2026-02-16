@@ -16,7 +16,7 @@ import type { CliFlags, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import type { AspectCodeConfig } from '../config';
 import type { Logger } from '../logger';
-import { fmt } from '../logger';
+import { fmt, createSpinner } from '../logger';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -26,7 +26,6 @@ interface ImpactSummary {
   file: string;
   dependents_count: number;
   top_dependents: Array<{ file: string; dependent_count: number }>;
-  hub_risk: 'LOW' | 'MEDIUM' | 'HIGH';
   generated_at: string;
 }
 
@@ -55,15 +54,16 @@ export async function runImpact(
   const exclude = config?.exclude;
 
   // Discover files.
-  log.debug('Discovering files…');
+  const spin = createSpinner('Discovering files…', { quiet: flags.quiet });
   const discoveredPaths = await discoverFiles(root, exclude ? { exclude } : undefined);
   if (discoveredPaths.length === 0) {
-    log.warn('No source files found.');
+    spin.fail('No source files found');
     return { exitCode: ExitCode.ERROR };
   }
-  log.debug(`Found ${discoveredPaths.length} source files`);
+  spin.stop(`Discovered ${discoveredPaths.length} files`);
 
   // Read file contents into cache for the analyzer.
+  const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: flags.quiet });
   const fileContents = new Map<string, string>();
   for (const abs of discoveredPaths) {
     try {
@@ -72,13 +72,15 @@ export async function runImpact(
       // skip unreadable
     }
   }
+  spinRead.stop(`Read ${fileContents.size} files`);
 
   // Analyze dependencies.
-  log.debug('Analyzing dependencies…');
+  const spinAnalyze = createSpinner('Analyzing dependencies…', { quiet: flags.quiet });
   const analyzer = new DependencyAnalyzer();
   analyzer.setFileContentsCache(fileContents);
   const host = createNodeHost(root);
   const links = await analyzer.analyzeDependencies(discoveredPaths, host);
+  spinAnalyze.stop(`Found ${links.length} dependency links`);
 
   // Compute degree stats.
   const stats = new Map<string, { inDegree: number; outDegree: number }>();
@@ -101,7 +103,6 @@ export async function runImpact(
       file: rel(normalizedTarget, root),
       dependents_count: 0,
       top_dependents: [],
-      hub_risk: 'LOW',
       generated_at: new Date().toISOString(),
     };
     return outputSummary(summary, flags, log);
@@ -130,22 +131,16 @@ export async function runImpact(
     .sort((a, b) => b.dependent_count - a.dependent_count || a.abs.localeCompare(b.abs));
 
   const dependentsCount = dependentsWithCounts.length;
-  const hubRisk: ImpactSummary['hub_risk'] =
-    dependentsCount >= 5 ? 'HIGH' : dependentsCount >= 3 ? 'MEDIUM' : 'LOW';
 
   const topDependents = dependentsWithCounts.slice(0, 5).map((d) => ({
     file: rel(d.abs, root),
     dependent_count: d.dependent_count,
   }));
 
-  const hubRiskAdjusted: ImpactSummary['hub_risk'] =
-    targetClass === 'test' && hubRisk === 'HIGH' ? 'MEDIUM' : hubRisk;
-
   const summary: ImpactSummary = {
     file: rel(normalizedTarget, root),
     dependents_count: dependentsCount,
     top_dependents: topDependents,
-    hub_risk: hubRiskAdjusted,
     generated_at: new Date().toISOString(),
   };
 
@@ -164,7 +159,6 @@ function outputSummary(
   } else {
     log.info(`File: ${fmt.cyan(summary.file)}`);
     log.info(`Dependents: ${fmt.bold(String(summary.dependents_count))}`);
-    log.info(`Hub risk: ${fmt.bold(summary.hub_risk)}`);
     if (summary.top_dependents.length > 0) {
       log.info('Top dependents:');
       for (const dep of summary.top_dependents) {
