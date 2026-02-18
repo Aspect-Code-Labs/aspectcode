@@ -6,7 +6,6 @@
 export type { ImportStatement, CallSite } from './importParsers';
 export {
   calculateImportStrength,
-  isLikelyExternalCall,
   analyzeFileCalls,
 } from './importParsers';
 

@@ -78,7 +78,6 @@ export {
   DependencyAnalyzer,
   analyzeFileCalls,
   calculateImportStrength,
-  isLikelyExternalCall,
   analyzeDependenciesForFile,
   getDependencyAdapterForFile,
   getRegisteredDependencyAdapters,

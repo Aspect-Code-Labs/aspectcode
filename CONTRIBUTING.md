@@ -64,6 +64,72 @@ Full architecture: [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)
 | `npm run typecheck` | Type-check only |
 | `npm test` | Run mocha tests |
 
+## CLI Testing (Safe Sandbox)
+
+When manually exercising the CLI during development, **always use the
+sandbox test runner** to avoid writing `.aspect/` or `AGENTS.md` into
+the repo root:
+
+```bash
+# Full run: build all packages, then test CLI in temp sandbox
+npm run test:cli
+
+# Fast run: skip build (assumes packages are already compiled)
+npm run test:cli:fast
+```
+
+You can also run the script directly for extra options:
+
+```powershell
+# Keep sandbox for manual inspection after the run
+.\scripts\test-cli-sandbox.ps1 -SkipBuild -SkipCleanup
+```
+
+The sandbox script copies `extension/test/fixtures/mini-repo` into a
+temp directory and runs all CLI commands with explicit `--root` and
+`--out` flags pointing there. It verifies the repo root stays clean.
+
+**For agents / AI coding assistants:** When testing the CLI, always
+pass `--root <path>` pointing to a temp copy of the fixture repo, and
+`--out <path>` pointing to a temp output directory. Never run
+`aspectcode generate` from the repo root without explicit flags.
+
+The VS Code task **"Aspect Code: Test CLI (sandbox)"** is also
+available from the Command Palette (Tasks: Run Task).
+
+### Multi-Repo Testing
+
+For comprehensive cross-language validation, the multi-repo test runner
+clones real open-source repos and runs the full CLI command matrix
+against each one:
+
+```bash
+# Full run: build + clone repos + exhaustive tests
+npm run test:cli:repos
+
+# Fast run: skip build
+npm run test:cli:repos:fast
+```
+
+The list of repos is defined in `scripts/test-repos.json`. You can
+filter to a single repo:
+
+```powershell
+.\scripts\test-cli-repos.ps1 -SkipBuild -RepoFilter flask
+```
+
+The test matrix per repo covers:
+- `init`, `init --force`
+- All settings commands (`set-out-dir`, `clear-out-dir`, `set-update-rate`, `add-exclude`, `remove-exclude`, `show-config`)
+- `generate` with every flag combination (`--kb-only`, `--copilot`, `--cursor`, `--claude`, `--other`, `--instructions-mode safe|permissive|off`, `--no-color`, `--verbose`, `--list-connections`)
+- `generate --json` with structure validation
+- `impact` and `deps list` (with `--file`, `--json`, `--list-connections`)
+- Error paths (unknown commands, invalid args)
+- Repo-root pollution checks after every repo
+
+All cloned repos are deleted after testing. Use `-SkipCleanup` to keep
+them for inspection.
+
 ## What to Work On
 
 - Bug fixes and reliability improvements

@@ -3,6 +3,10 @@
   "workspaces": ["extension", "packages/*"],
   "scripts": {
     "test:checklist": "powershell -ExecutionPolicy Bypass -File ./scripts/test-aspectcode.ps1",
-    "test:checklist:fast": "powershell -ExecutionPolicy Bypass -File ./scripts/test-aspectcode.ps1 -SkipInstall -SkipBuild"
+    "test:checklist:fast": "powershell -ExecutionPolicy Bypass -File ./scripts/test-aspectcode.ps1 -SkipInstall -SkipBuild",
+    "test:cli": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-sandbox.ps1",
+    "test:cli:fast": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-sandbox.ps1 -SkipBuild",
+    "test:cli:repos": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-repos.ps1",
+    "test:cli:repos:fast": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-repos.ps1 -SkipBuild"
   }
 }
