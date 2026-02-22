@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
  * Lightweight in-memory extension state.
  * The panel is gone — this holds only ephemeral runtime flags.
  */
-export type ExtensionState = {
+type ExtensionState = {
   busy: boolean;
   error?: string;
 };

@@ -47,14 +47,6 @@ export interface GenerateJsonPayload {
   }>;
 }
 
-/** JSON payload emitted by `aspectcode impact --json`. */
-export interface ImpactJsonPayload {
-  file: string;
-  dependents_count: number;
-  top_dependents: Array<{ file: string; dependent_count: number }>;
-  generated_at: string;
-}
-
 /** Options for a single CLI invocation. */
 export interface CliRunOptions {
   /** Workspace root (passed as `--root`). */
@@ -282,24 +274,6 @@ export async function cliGenerateWithInstructions(
     args,
     outputChannel: options?.outputChannel,
     token: options?.token,
-  });
-}
-
-/**
- * Run `aspectcode impact --file <path> --json`.
- */
-export async function cliImpact(
-  root: string,
-  filePath: string,
-  options?: {
-    outputChannel?: vscode.OutputChannel;
-    token?: vscode.CancellationToken;
-  },
-): Promise<CliResult<ImpactJsonPayload>> {
-  return runCli<ImpactJsonPayload>({
-    root,
-    args: ['impact', '--file', filePath, '--json'],
-    ...options,
   });
 }
 

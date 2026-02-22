@@ -67,7 +67,6 @@ supports additional modes (`permissive`, `off`) for advanced workflows.
 | Command | Description |
 |---------|-------------|
 | Configure AI Assistants | Generate KB and instruction files |
-| Copy Impact Analysis | Copy dependency impact for current file |
 | Copy KB Receipt Prompt | Copy prompt to verify AI can read KB |
 | Enable Safe Mode | Ensure instruction files use safe mode |
 

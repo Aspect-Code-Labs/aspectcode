@@ -136,21 +136,6 @@ export class FileDiscoveryService implements vscode.Disposable {
   }
 
   /**
-   * Get cached files if available (no discovery if cache is empty).
-   * Useful for best-effort access without triggering expensive operations.
-   */
-  getCachedFiles(): string[] | null {
-    return this.cachedResult?.files ?? null;
-  }
-
-  /**
-   * Get cached fingerprint if available.
-   */
-  getCachedFingerprint(): string | null {
-    return this.cachedResult?.fingerprint ?? null;
-  }
-
-  /**
    * Get computed exclusions. Computes once and caches, stores in settings.
    */
   async getExclusions(): Promise<ComputedExclusions> {
@@ -171,23 +156,6 @@ export class FileDiscoveryService implements vscode.Disposable {
 
     // Save to settings (async, non-blocking)
     void this.saveExclusionsToSettings(exclusions);
-
-    return exclusions;
-  }
-
-  /**
-   * Force recomputation of exclusions (e.g., when user changes settings).
-   */
-  async recomputeExclusions(): Promise<ComputedExclusions> {
-    this.cachedExclusions = null;
-    const exclusions = await this.computeExclusions();
-    this.cachedExclusions = exclusions;
-
-    // Save to settings
-    await this.saveExclusionsToSettings(exclusions);
-
-    // Mark files as dirty since exclusions changed
-    this.invalidate();
 
     return exclusions;
   }

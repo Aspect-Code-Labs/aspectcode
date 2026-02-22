@@ -10,16 +10,25 @@ import type { AnalysisModel } from '@aspectcode/core';
 import { createInstructionsEmitter } from '@aspectcode/emitters';
 import { AspectCodeState } from './state';
 import { detectAssistants, AssistantId } from './assistants/detection';
-import type { AssistantsOverride } from './assistants/instructions';
 import { generateKnowledgeBase } from './assistants/kb';
 import { createVsCodeEmitterHost } from './services/vscodeEmitterHost';
+
+/**
+ * Optional override for assistant selection when called from configureAssistants.
+ */
+interface AssistantsOverride {
+  copilot?: boolean;
+  cursor?: boolean;
+  claude?: boolean;
+  other?: boolean;
+}
 import {
   getAssistantsSettings,
   getInstructionsModeSetting,
   updateAspectSettings,
   getExtensionEnabledSetting,
   setExtensionEnabledSetting,
-  setAutoRegenerateKbSetting,
+  setUpdateRateSetting,
 } from './services/aspectSettings';
 import { cancelAndResetAllInFlightWork } from './services/enablementCancellation';
 import { cliGenerateWithInstructions } from './services/CliAdapter';
@@ -498,7 +507,7 @@ async function handleGenerate(
           'Manual Only': 'manual',
         };
         const mode = modeMap[choice] ?? 'onChange';
-        await setAutoRegenerateKbSetting(workspaceRoot, mode);
+        await setUpdateRateSetting(workspaceRoot, mode);
         outputChannel.appendLine(`[Settings] User chose update rate: ${mode}`);
       }
     } else {

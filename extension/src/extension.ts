@@ -5,12 +5,11 @@ import { loadGrammarsOnce, getLoadedGrammarsSummary } from './tsParser';
 import { AspectCodeState } from './state';
 import { activateCommands } from './commandHandlers';
 import { WorkspaceFingerprint } from './services/WorkspaceFingerprint';
-import { computeImpactSummaryForFile } from './assistants/kb';
 import {
-  getAutoRegenerateKbSetting,
+  getUpdateRateSetting,
   migrateAspectSettingsFromVSCode,
   readAspectSettings,
-  setAutoRegenerateKbSetting,
+  setUpdateRateSetting,
   getExtensionEnabledSetting,
 } from './services/aspectSettings';
 import {
@@ -213,7 +212,7 @@ export async function activate(context: vscode.ExtensionContext) {
       // setup prompt that checks for its absence.
       const settings = await readAspectSettings(rootUri);
       if (settings.updateRate === undefined && settings.autoRegenerateKb === undefined) {
-        await setAutoRegenerateKbSetting(rootUri, 'onChange', { createIfMissing: false });
+        await setUpdateRateSetting(rootUri, 'onChange', { createIfMissing: false });
       }
     }
   } catch (e) {
@@ -238,7 +237,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Initialize fingerprint service with project-local mode and keep it updated.
     try {
-      const mode = await getAutoRegenerateKbSetting(vscode.Uri.file(workspaceRoot), outputChannel);
+      const mode = await getUpdateRateSetting(vscode.Uri.file(workspaceRoot), outputChannel);
       workspaceFingerprint.setAutoRegenerateKbMode(mode);
     } catch {}
 
@@ -247,7 +246,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const refreshFromAspectSettings = async () => {
       try {
-        const mode = await getAutoRegenerateKbSetting(
+        const mode = await getUpdateRateSetting(
           vscode.Uri.file(workspaceRoot),
           outputChannel,
         );
@@ -309,64 +308,6 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  // ===== CORE COMMANDS =====
-
-  // Copy a short impact summary for the current file to clipboard.
-  context.subscriptions.push(
-    vscode.commands.registerCommand('aspectcode.copyImpactAnalysisCurrentFile', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showWarningMessage('No active file.');
-        return;
-      }
-
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showWarningMessage('No workspace folder open.');
-        return;
-      }
-
-      const wsRoot = workspaceFolders[0].uri;
-      const absPath = editor.document.uri.fsPath;
-
-      const channel = outputChannel ?? vscode.window.createOutputChannel('Aspect Code');
-      channel.appendLine(`[Impact] Computing impact for: ${absPath}`);
-
-      const summary = await vscode.window.withProgress(
-        {
-          location: vscode.ProgressLocation.Notification,
-          title: 'Aspect Code: Computing impact analysis...',
-          cancellable: false,
-        },
-        async () => computeImpactSummaryForFile(wsRoot, absPath, channel),
-      );
-
-      if (!summary) {
-        vscode.window.showWarningMessage(
-          'Impact analysis unavailable. Try running "Aspect Code: Generate" first.',
-        );
-        return;
-      }
-
-      const lines: string[] = [];
-      lines.push('Aspect Code — Impact Analysis');
-      lines.push(`File: ${summary.file}`);
-      lines.push(`Dependents: ${summary.dependents_count}`);
-      if (summary.top_dependents.length > 0) {
-        lines.push('Top dependents:');
-        for (const dep of summary.top_dependents) {
-          lines.push(`- ${dep.file} (${dep.dependent_count} dependents)`);
-        }
-      } else {
-        lines.push('Top dependents: (none found)');
-      }
-      lines.push(`Generated: ${summary.generated_at}`);
-
-      await vscode.env.clipboard.writeText(lines.join('\n'));
-      vscode.window.showInformationMessage('Impact analysis copied to clipboard.');
-    }),
-  );
-
   // ===== EXTENSION SETUP =====
   outputChannel.appendLine('Aspect Code extension activated');
 
@@ -421,7 +362,7 @@ export async function activate(context: vscode.ExtensionContext) {
         workspaceFingerprint?.onFileEdited();
 
         const autoRegen = workspaceRoot
-          ? await getAutoRegenerateKbSetting(vscode.Uri.file(workspaceRoot))
+          ? await getUpdateRateSetting(vscode.Uri.file(workspaceRoot))
           : 'onChange';
         if (autoRegen === 'onChange' && isBulkEdit(event.contentChanges)) {
           workspaceFingerprint?.onFileSaved(filePath);

@@ -54,11 +54,6 @@
         "title": "Aspect Code: Toggle Enabled"
       },
       {
-        "command": "aspectcode.copyImpactAnalysisCurrentFile",
-        "title": "Aspect Code: Copy Impact Analysis for Current File",
-        "icon": "$(clippy)"
-      },
-      {
         "command": "aspectcode.configureAssistants",
         "title": "Aspect Code: Configure AI Assistants",
         "icon": "$(sparkle)"
@@ -109,8 +104,6 @@
     "@types/diff": "^5.2.2",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.92.0",
-    "@vscode/test-electron": "^2.3.8",
-    "chai": "^4.4.1",
     "esbuild": "^0.21.5",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.0.0",

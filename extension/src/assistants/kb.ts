@@ -6,16 +6,14 @@
  *   - File discovery via VS Code APIs
  *   - Progress reporting
  *   - Gitignore prompt
- *   - Impact summary for clipboard command
  */
 
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { type AnalysisModel } from '@aspectcode/core';
 import * as aspectCore from '@aspectcode/core';
-import { runEmitters, classifyFile } from '@aspectcode/emitters';
+import { runEmitters } from '@aspectcode/emitters';
 import { AspectCodeState } from '../state';
-import { DependencyAnalyzer, type DependencyLink } from '../services/DependencyAnalyzer';
 import { loadGrammarsOnce, type LoadedGrammars } from '../tsParser';
 import { ensureGitignoreForTarget } from '../services/gitignoreService';
 import type { GitignoreTarget } from '../services/aspectSettings';
@@ -23,7 +21,7 @@ import { discoverSourceFiles } from '../services/DirectoryExclusion';
 import { getFileDiscoveryService } from '../services/FileDiscoveryService';
 import { createVsCodeEmitterHost } from '../services/vscodeEmitterHost';
 import { buildRelativeFileContentMap } from './kbShared';
-import { cliGenerate, cliImpact } from '../services/CliAdapter';
+import { cliGenerate } from '../services/CliAdapter';
 
 // ============================================================================
 // File Content Cache
@@ -76,7 +74,7 @@ async function preloadFileContents(files: string[]): Promise<Map<string, string>
  *
  * @returns Object with regenerated flag and discovered files (for markKbFresh)
  */
-export interface RegenerateResult {
+interface RegenerateResult {
   regenerated: boolean;
   files: string[];
 }
@@ -294,164 +292,6 @@ async function generateKnowledgeBaseInProcess(
   return files;
 }
 
-// ============================================================================
-// Impact Analysis
-// ============================================================================
-
-export type ImpactSummary = {
-  file: string;
-  dependents_count: number;
-  top_dependents: Array<{ file: string; dependent_count: number }>;
-  generated_at: string;
-};
-
-/**
- * Computes a lightweight impact summary for a single file.
- * Tries CLI subprocess first, falls back to in-process analysis.
- */
-export async function computeImpactSummaryForFile(
-  workspaceRoot: vscode.Uri,
-  absoluteFilePath: string,
-  outputChannel: vscode.OutputChannel,
-): Promise<ImpactSummary | null> {
-  // ── Try CLI subprocess first ──────────────────────────────
-  const relPath = path.relative(workspaceRoot.fsPath, absoluteFilePath).replace(/\\/g, '/');
-  const cliResult = await cliImpact(workspaceRoot.fsPath, relPath, { outputChannel });
-  if (cliResult.exitCode === 0 && cliResult.data) {
-    outputChannel.appendLine(`[Impact] CLI impact succeeded for ${relPath}`);
-    return cliResult.data;
-  }
-
-  outputChannel.appendLine(
-    `[Impact] CLI unavailable (exit=${cliResult.exitCode}), falling back to in-process`,
-  );
-
-  // ── In-process fallback ───────────────────────────────────
-  return computeImpactSummaryInProcess(workspaceRoot, absoluteFilePath, outputChannel);
-}
-
-/**
- * In-process impact analysis fallback.
- */
-async function computeImpactSummaryInProcess(
-  workspaceRoot: vscode.Uri,
-  absoluteFilePath: string,
-  outputChannel: vscode.OutputChannel,
-): Promise<ImpactSummary | null> {
-  try {
-    const files = await discoverWorkspaceFiles(workspaceRoot);
-    if (files.length === 0) return null;
-
-    const normalizedTarget = path.resolve(absoluteFilePath);
-    const fileContentCache = await preloadFileContents(files);
-    const { stats: depData, links: allLinks } = await getDetailedDependencyData(
-      workspaceRoot,
-      files,
-      outputChannel,
-      fileContentCache,
-    );
-
-    const targetClass = classifyFile(normalizedTarget, workspaceRoot.fsPath);
-    if (targetClass === 'third_party') {
-      return {
-        file: makeRelativePath(normalizedTarget, workspaceRoot.fsPath),
-        dependents_count: 0,
-        top_dependents: [],
-        generated_at: new Date().toISOString(),
-      };
-    }
-
-    const dependentAbs = dedupe(
-      allLinks
-        .filter((l) => l.target && path.resolve(l.target) === normalizedTarget)
-        .map((l) => l.source)
-        .filter(Boolean)
-        .filter((s) => s !== normalizedTarget)
-        .filter((s) => classifyFile(s, workspaceRoot.fsPath) !== 'third_party'),
-    );
-
-    // Prefer showing app/test dependents; if none, fall back to whatever we found.
-    const appOrTestDependents = dependentAbs.filter((s) => {
-      const c = classifyFile(s, workspaceRoot.fsPath);
-      return c === 'app' || c === 'test';
-    });
-    const dependentsToUse = appOrTestDependents.length > 0 ? appOrTestDependents : dependentAbs;
-
-    const dependentsWithCounts = dependentsToUse
-      .map((dep) => ({
-        abs: dep,
-        dependent_count: depData.get(dep)?.inDegree ?? 0,
-      }))
-      .sort((a, b) => b.dependent_count - a.dependent_count || a.abs.localeCompare(b.abs));
-
-    const dependentsCount = dependentsWithCounts.length;
-
-    const topDependents = dependentsWithCounts.slice(0, 5).map((d) => ({
-      file: makeRelativePath(d.abs, workspaceRoot.fsPath),
-      dependent_count: d.dependent_count,
-    }));
-
-    return {
-      file: makeRelativePath(normalizedTarget, workspaceRoot.fsPath),
-      dependents_count: dependentsCount,
-      top_dependents: topDependents,
-      generated_at: new Date().toISOString(),
-    };
-  } catch (e) {
-    outputChannel.appendLine(`[Impact] Impact summary failed: ${e}`);
-    return null;
-  }
-}
-
-// ============================================================================
-// Internal Helpers
-// ============================================================================
-
-async function getDetailedDependencyData(
-  workspaceRoot: vscode.Uri,
-  files: string[],
-  outputChannel: vscode.OutputChannel,
-  fileContentCache?: Map<string, string>,
-): Promise<{
-  stats: Map<string, { inDegree: number; outDegree: number }>;
-  links: DependencyLink[];
-}> {
-  const stats = new Map<string, { inDegree: number; outDegree: number }>();
-  let links: DependencyLink[] = [];
-
-  try {
-    if (files.length === 0) return { stats, links };
-
-    const analyzer = new DependencyAnalyzer();
-    if (fileContentCache && fileContentCache.size > 0) {
-      analyzer.setFileContentsCache(fileContentCache);
-    }
-    outputChannel.appendLine(`[KB] Starting dependency analysis for ${files.length} files...`);
-    const depStart = Date.now();
-    links = await analyzer.analyzeDependencies(files);
-    outputChannel.appendLine(
-      `[KB] Dependency analysis complete: ${links.length} links in ${Date.now() - depStart}ms`,
-    );
-
-    for (const file of files) {
-      stats.set(file, { inDegree: 0, outDegree: 0 });
-    }
-
-    for (const link of links) {
-      const sourceStats = stats.get(link.source);
-      const targetStats = stats.get(link.target);
-      if (sourceStats) sourceStats.outDegree++;
-      if (targetStats) targetStats.inDegree++;
-    }
-
-    outputChannel.appendLine(`[KB] Analyzed ${links.length} dependencies`);
-  } catch (error) {
-    outputChannel.appendLine(`[KB] Dependency analysis failed: ${error}`);
-  }
-
-  return { stats, links };
-}
-
 /**
  * Discover workspace files using the centralized FileDiscoveryService.
  * Falls back to direct discovery if the service isn't initialized.
@@ -465,24 +305,4 @@ async function discoverWorkspaceFiles(
     return service.getFiles();
   }
   return discoverSourceFiles(workspaceRoot, outputChannel);
-}
-
-function makeRelativePath(absPath: string, workspaceRoot: string): string {
-  const normalizedAbs = absPath.replace(/\\/g, '/');
-  const normalizedRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/$/, '');
-
-  if (normalizedAbs.startsWith(normalizedRoot)) {
-    return normalizedAbs.substring(normalizedRoot.length).replace(/^\//, '');
-  }
-  return path.basename(absPath);
-}
-
-function dedupe<T>(items: T[], keyFn?: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = keyFn ? keyFn(item) : String(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }

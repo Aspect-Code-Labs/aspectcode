@@ -12,8 +12,8 @@ import type { ExclusionSettings } from './DirectoryExclusion';
 // Re-export ExclusionSettings for consumers
 export type { ExclusionSettings } from './DirectoryExclusion';
 
-export type InstructionsMode = 'safe' | 'permissive' | 'custom' | 'off';
-export type UpdateRateMode = 'manual' | 'onChange' | 'idle';
+export type InstructionsMode = 'safe' | 'custom' | 'off';
+type UpdateRateMode = 'manual' | 'onChange' | 'idle';
 export type AutoRegenerateKbMode = UpdateRateMode | 'off' | 'onSave';
 
 export interface AssistantsSettings {
@@ -32,7 +32,7 @@ export type GitignoreTarget =
   | '.github/copilot-instructions.md'
   | '.cursor/rules/aspectcode.mdc';
 
-export const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
+const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
   '.aspect/',
   'AGENTS.md',
   'CLAUDE.md',
@@ -43,7 +43,7 @@ export const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
 /**
  * Schema for aspectcode.json
  */
-export interface AspectSettings {
+interface AspectSettings {
   /**
    * Per-target gitignore preferences.
    * true = add to .gitignore (keep local)
@@ -70,7 +70,7 @@ export interface AspectSettings {
   autoRegenerateKb?: 'off' | 'onSave' | 'idle';
 
   /**
-   * Instructions mode: 'safe' or 'permissive'
+   * Instructions mode: 'safe' or 'custom'
    */
   instructionsMode?: InstructionsMode;
 
@@ -97,7 +97,8 @@ function cacheKey(workspaceRoot: vscode.Uri): string {
 }
 
 function normalizeInstructionsMode(value: unknown): InstructionsMode | undefined {
-  return value === 'safe' ? 'safe' : undefined;
+  if (value === 'safe' || value === 'custom' || value === 'off') return value;
+  return undefined;
 }
 
 function normalizeAutoRegenerateKbMode(value: unknown): UpdateRateMode | undefined {
@@ -111,20 +112,6 @@ function normalizeAutoRegenerateKbMode(value: unknown): UpdateRateMode | undefin
     return 'onChange';
   }
   return undefined;
-}
-
-/**
- * Check if the .aspect/ directory exists in the workspace.
- * Used to prevent auto-creation of settings when KB hasn't been generated yet.
- */
-export async function aspectDirExists(workspaceRoot: vscode.Uri): Promise<boolean> {
-  try {
-    const aspectDir = vscode.Uri.joinPath(workspaceRoot, '.aspect');
-    await vscode.workspace.fs.stat(aspectDir);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -163,7 +150,7 @@ export async function readAspectSettings(workspaceRoot: vscode.Uri): Promise<Asp
 /**
  * Write settings to aspectcode.json
  */
-export async function writeAspectSettings(
+async function writeAspectSettings(
   workspaceRoot: vscode.Uri,
   settings: AspectSettings,
 ): Promise<void> {
@@ -175,7 +162,7 @@ export async function writeAspectSettings(
   SETTINGS_CACHE.set(cacheKey(workspaceRoot), { loadedAtMs: Date.now(), settings });
 }
 
-export interface UpdateAspectSettingsOptions {
+interface UpdateAspectSettingsOptions {
   /**
    * If false, skip the update if aspectcode.json doesn't exist.
    * Default: true (create if missing for backwards compat)
@@ -353,14 +340,7 @@ export async function getInstructionsModeSetting(
   return settings.instructionsMode ?? 'safe';
 }
 
-export async function setInstructionsModeSetting(
-  workspaceRoot: vscode.Uri,
-  mode: InstructionsMode,
-): Promise<void> {
-  await updateAspectSettings(workspaceRoot, { instructionsMode: mode });
-}
-
-export async function getAutoRegenerateKbSetting(
+export async function getUpdateRateSetting(
   workspaceRoot: vscode.Uri,
   _outputChannel?: vscode.OutputChannel,
 ): Promise<AutoRegenerateKbMode> {
@@ -370,7 +350,7 @@ export async function getAutoRegenerateKbSetting(
   );
 }
 
-export async function setAutoRegenerateKbSetting(
+export async function setUpdateRateSetting(
   workspaceRoot: vscode.Uri,
   mode: AutoRegenerateKbMode,
   options: UpdateAspectSettingsOptions = {},
@@ -438,7 +418,7 @@ export async function setGitignorePreference(
 /**
  * User-friendly descriptions for each gitignore target
  */
-export function getTargetDescription(target: GitignoreTarget): string {
+function getTargetDescription(target: GitignoreTarget): string {
   switch (target) {
     case '.aspect/':
       return 'the Aspect Code knowledge base (.aspect/)';
@@ -502,78 +482,4 @@ export async function hasGitignorePreference(
 ): Promise<boolean> {
   const pref = await getGitignorePreference(workspaceRoot, target);
   return pref !== undefined;
-}
-
-// ============================================================================
-// Directory Exclusion Settings
-// ============================================================================
-
-/**
- * Get directory exclusion settings.
- * Returns undefined fields if not configured (use defaults).
- */
-export async function getExclusionSettings(
-  workspaceRoot: vscode.Uri,
-): Promise<ExclusionSettings | undefined> {
-  const settings = await readAspectSettings(workspaceRoot);
-  return settings.excludeDirectories;
-}
-
-/**
- * Update directory exclusion settings (merges with existing).
- */
-export async function updateExclusionSettings(
-  workspaceRoot: vscode.Uri,
-  exclusionSettings: Partial<ExclusionSettings>,
-): Promise<void> {
-  const current = await readAspectSettings(workspaceRoot);
-  await updateAspectSettings(workspaceRoot, {
-    excludeDirectories: {
-      ...current.excludeDirectories,
-      ...exclusionSettings,
-    },
-  });
-}
-
-/**
- * Add a directory to the "always exclude" list.
- */
-export async function addAlwaysExcludeDir(workspaceRoot: vscode.Uri, dir: string): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const always = current?.always ?? [];
-  const normalized = dir.replace(/\\/g, '/');
-  if (!always.includes(normalized)) {
-    await updateExclusionSettings(workspaceRoot, {
-      always: [...always, normalized],
-    });
-  }
-}
-
-/**
- * Add a directory to the "never exclude" list (override auto-detection).
- */
-export async function addNeverExcludeDir(workspaceRoot: vscode.Uri, dir: string): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const never = current?.never ?? [];
-  const normalized = dir.replace(/\\/g, '/');
-  if (!never.includes(normalized)) {
-    await updateExclusionSettings(workspaceRoot, {
-      never: [...never, normalized],
-    });
-  }
-}
-
-/**
- * Remove a directory from exclusion lists.
- */
-export async function removeExclusionOverride(
-  workspaceRoot: vscode.Uri,
-  dir: string,
-): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const normalized = dir.replace(/\\/g, '/');
-  await updateExclusionSettings(workspaceRoot, {
-    always: (current?.always ?? []).filter((d) => d !== normalized),
-    never: (current?.never ?? []).filter((d) => d !== normalized),
-  });
 }
