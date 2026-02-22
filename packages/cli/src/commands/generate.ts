@@ -4,85 +4,57 @@
  * Pipeline: discoverFiles → readAll → analyzeRepoWithDependencies → runEmitters → report
  */
 
-import * as fs from 'fs';
 import * as path from 'path';
 import {
-  discoverFiles,
   analyzeRepoWithDependencies,
-  createNodeHostForWorkspace,
 } from '@aspectcode/core';
 import {
   createNodeEmitterHost,
   runEmitters,
 } from '@aspectcode/emitters';
 import type { EmitOptions, AssistantFlags } from '@aspectcode/emitters';
-import type { CliFlags, CommandResult } from '../cli';
+import type { CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
-import type { AspectCodeConfig } from '../config';
-import type { Logger } from '../logger';
 import { fmt, createSpinner } from '../logger';
-import { collectConnections, filterConnectionsByFile } from './deps';
+import { loadWorkspaceFiles } from '../workspace';
+import { collectConnections, filterConnectionsByFile } from '../connections';
 
-export async function runGenerate(
-  root: string,
-  flags: CliFlags,
-  config: AspectCodeConfig | undefined,
-  log: Logger,
-): Promise<CommandResult> {
+export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
+  const { root, flags, config, log } = ctx;
   const startMs = Date.now();
 
   // ── 1. Resolve options ────────────────────────────────────
   const outDir = flags.out ?? config?.outDir ?? undefined;
   const resolvedOut = outDir ? path.resolve(root, outDir) : root;
-  const exclude = config?.exclude;
-
   if (!flags.json) {
     log.info(`Workspace: ${fmt.cyan(root)}`);
     if (outDir) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
     log.blank();
   }
 
-  // ── 2. Discover files ─────────────────────────────────────
-  const spin = createSpinner('Discovering files…', { quiet: flags.quiet });
-  const discoveredPaths = await discoverFiles(root, exclude ? { exclude } : undefined);
+  // ── 2. Discover & read files ───────────────────────────────
+  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet });
 
-  if (discoveredPaths.length === 0) {
-    spin.fail('No source files found');
+  if (workspace.discoveredPaths.length === 0) {
     log.warn('Check your exclude patterns.');
     return { exitCode: ExitCode.ERROR };
   }
-  spin.stop(`Discovered ${discoveredPaths.length} files`);
 
-  // ── 3. Read file contents ─────────────────────────────────
-  const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: flags.quiet });
-  const fileContents = new Map<string, string>();
-  const absoluteFileContents = new Map<string, string>();
-  for (const abs of discoveredPaths) {
-    const rel = path.relative(root, abs).replace(/\\/g, '/');
-    try {
-      const content = fs.readFileSync(abs, 'utf-8');
-      fileContents.set(rel, content);
-      absoluteFileContents.set(abs, content);
-    } catch {
-      log.debug(`  skip (unreadable): ${rel}`);
-    }
-  }
-  spinRead.stop(`Read ${fileContents.size} files`);
+  const { relativeFiles: fileContents, absoluteFiles: absoluteFileContents } = workspace;
 
-  // ── 4. Analyze ────────────────────────────────────────────
+  // ── 3. Analyze ────────────────────────────────────────────
   const spinAnalyze = createSpinner('Analyzing…', { quiet: flags.quiet });
-  const analysisHost = createNodeHostForWorkspace(root);
   const model = await analyzeRepoWithDependencies(
     root,
     fileContents,
     absoluteFileContents,
-    analysisHost,
+    workspace.host,
   );
   spinAnalyze.stop(
     `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
   );
 
-  // ── 5. Resolve instruction target ─────────────────────────
+  // ── 4. Resolve instruction target ─────────────────────────
   const host = createNodeEmitterHost();
 
   // Determine assistant selection: explicit flags override default.
@@ -109,7 +81,7 @@ export async function runGenerate(
     log.info(`Instructions: ${fmt.cyan(targets.join(', ') || '(none)')}`);
   }
 
-  // ── 6. Emit artifacts ─────────────────────────────────────
+  // ── 5. Emit artifacts ─────────────────────────────────────
   const spinEmit = createSpinner('Writing artifacts…', { quiet: flags.quiet });
 
   const emitOpts: EmitOptions = {
@@ -143,7 +115,7 @@ export async function runGenerate(
     }
   }
 
-  // ── 7. Report ─────────────────────────────────────────────
+  // ── 6. Report ─────────────────────────────────────────────
   const elapsedMs = Date.now() - startMs;
 
   if (flags.json) {

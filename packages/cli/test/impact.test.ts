@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runImpact } from '../src/commands/impact';
-import type { CliFlags } from '../src/cli';
+import type { CliFlags, CommandContext } from '../src/cli';
 import { createLogger } from '../src/logger';
 
 function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
@@ -29,6 +29,16 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
   };
 }
 
+function makeCtx(root: string, overrides: Partial<CliFlags> = {}): CommandContext {
+  return {
+    root,
+    flags: makeFlags(overrides),
+    config: undefined,
+    log: createLogger({ quiet: true }),
+    positionals: [],
+  };
+}
+
 function writeSourceFiles(dir: string): void {
   fs.writeFileSync(
     path.join(dir, 'index.ts'),
@@ -39,7 +49,6 @@ function writeSourceFiles(dir: string): void {
 
 describe('impact command', () => {
   let tmpDir: string;
-  const log = createLogger({ quiet: true });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-impact-'));
@@ -50,28 +59,18 @@ describe('impact command', () => {
   });
 
   it('returns USAGE when --file is not provided', async () => {
-    const result = await runImpact(tmpDir, makeFlags(), undefined, log);
+    const result = await runImpact(makeCtx(tmpDir));
     assert.equal(result.exitCode, 2);
   });
 
   it('returns ERROR when target file does not exist', async () => {
-    const result = await runImpact(
-      tmpDir,
-      makeFlags({ file: 'nonexistent.ts' }),
-      undefined,
-      log,
-    );
+    const result = await runImpact(makeCtx(tmpDir, { file: 'nonexistent.ts' }));
     assert.equal(result.exitCode, 1);
   });
 
   it('returns OK for a valid file', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runImpact(
-      tmpDir,
-      makeFlags({ file: 'utils.ts' }),
-      undefined,
-      log,
-    );
+    const result = await runImpact(makeCtx(tmpDir, { file: 'utils.ts' }));
     assert.equal(result.exitCode, 0);
   });
 
@@ -86,12 +85,7 @@ describe('impact command', () => {
     }) as typeof process.stdout.write;
 
     try {
-      const result = await runImpact(
-        tmpDir,
-        makeFlags({ file: 'utils.ts', json: true }),
-        undefined,
-        log,
-      );
+      const result = await runImpact(makeCtx(tmpDir, { file: 'utils.ts', json: true }));
       assert.equal(result.exitCode, 0);
       const parsed = JSON.parse(output.trim());
       assert.ok(typeof parsed.file === 'string');

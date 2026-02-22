@@ -2,11 +2,14 @@
  * @aspectcode/cli — main entry point.
  *
  * Hand-rolled argv parser (no external deps). Routes to command handlers.
+ * Flag definitions live in cli.ts (FLAG_DEFS) — parseArgs and printHelp
+ * derive from that single source of truth.
  */
 
 import * as path from 'path';
 import type { CliArgs, CliFlags, CommandResult } from './cli';
-import { ExitCode } from './cli';
+import { ExitCode, FLAG_DEFS, flagPropName } from './cli';
+import type { CommandContext } from './cli';
 import { loadConfig } from './config';
 import { createLogger, disableColor, fmt } from './logger';
 import { getVersion } from './version';
@@ -23,6 +26,15 @@ import {
   runSetUpdateRate,
   runShowConfig,
 } from './commands/settings';
+
+// ── Build lookup tables from FLAG_DEFS ───────────────────────
+
+/** Map --long-name → FlagDef */
+const longMap = new Map(FLAG_DEFS.map((d) => [`--${d.name}`, d]));
+/** Map -x → FlagDef */
+const shortMap = new Map(
+  FLAG_DEFS.filter((d) => d.short).map((d) => [`-${d.short}`, d]),
+);
 
 // ── Argv parsing ─────────────────────────────────────────────
 
@@ -51,64 +63,33 @@ export function parseArgs(argv: string[]): CliArgs {
   while (i < args.length) {
     const arg = args[i];
 
-    if (arg === '--help' || arg === '-h') {
-      flags.help = true;
-    } else if (arg === '--version' || arg === '-V') {
-      flags.version = true;
-    } else if (arg === '--verbose' || arg === '-v') {
-      flags.verbose = true;
-    } else if (arg === '--quiet' || arg === '-q') {
-      flags.quiet = true;
-    } else if (arg === '--force' || arg === '-f') {
-      flags.force = true;
-    } else if (arg === '--root' || arg === '-r') {
-      flags.root = args[++i];
-    } else if (arg.startsWith('--root=')) {
-      flags.root = arg.slice('--root='.length);
-    } else if (arg === '--out' || arg === '-o') {
-      flags.out = args[++i];
-    } else if (arg.startsWith('--out=')) {
-      flags.out = arg.slice('--out='.length);
-    } else if (arg === '--list-connections') {
-      flags.listConnections = true;
-    } else if (arg === '--json') {
-      flags.json = true;
-    } else if (arg === '--file') {
-      flags.file = args[++i];
-    } else if (arg.startsWith('--file=')) {
-      flags.file = arg.slice('--file='.length);
-    } else if (arg === '--mode') {
-      const v = args[++i];
-      if (v === 'manual' || v === 'onChange' || v === 'idle') {
-        flags.mode = v;
+    // Try --long-name or -x lookup
+    const eqIdx = arg.indexOf('=');
+    const key = eqIdx > 0 ? arg.slice(0, eqIdx) : arg;
+    const def = longMap.get(key) ?? shortMap.get(key);
+
+    if (def) {
+      const prop = flagPropName(def) as keyof CliFlags;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const record = flags as any;
+      if (def.type === 'boolean') {
+        record[prop] = true;
+      } else if (def.type === 'string') {
+        const val = eqIdx > 0 ? arg.slice(eqIdx + 1) : args[++i];
+        record[prop] = val;
+      } else if (def.type === 'enum' && def.values) {
+        const val = eqIdx > 0 ? arg.slice(eqIdx + 1) : args[++i];
+        if (def.values.includes(val)) {
+          record[prop] = val;
+        }
       }
-    } else if (arg.startsWith('--mode=')) {
-      const v = arg.slice('--mode='.length);
-      if (v === 'manual' || v === 'onChange' || v === 'idle') {
-        flags.mode = v;
+    } else if (arg.startsWith('--') && eqIdx > 0) {
+      // Unknown --flag=value — try lookup by prefix before '='
+      const stderr = process.stderr;
+      if (stderr && typeof stderr.write === 'function') {
+        stderr.write(`Warning: unknown flag ${key}\n`);
       }
-    } else if (arg === '--kb-only') {
-      flags.kbOnly = true;
-    } else if (arg === '--copilot') {
-      flags.copilot = true;
-    } else if (arg === '--cursor') {
-      flags.cursor = true;
-    } else if (arg === '--claude') {
-      flags.claude = true;
-    } else if (arg === '--other') {
-      flags.other = true;
-    } else if (arg === '--instructions-mode') {
-      const v = args[++i];
-      if (v === 'safe' || v === 'permissive' || v === 'off') {
-        flags.instructionsMode = v;
-      }
-    } else if (arg.startsWith('--instructions-mode=')) {
-      const v = arg.slice('--instructions-mode='.length);
-      if (v === 'safe' || v === 'permissive' || v === 'off') {
-        flags.instructionsMode = v;
-      }
-    } else if (arg === '--no-color') {
-      flags.noColor = true;
     } else if (arg.startsWith('-')) {
       // Unknown flag — warn but keep going for forward compat
       const stderr = process.stderr;
@@ -130,6 +111,19 @@ export function parseArgs(argv: string[]): CliArgs {
 // ── Help text ────────────────────────────────────────────────
 
 function printHelp(): void {
+  const optionLines: string[] = [];
+
+  for (const def of FLAG_DEFS) {
+    const shortPart = def.short ? `-${def.short}, ` : '    ';
+    const longPart = `--${def.name}`;
+    const valuePart =
+      def.type === 'string' ? ' <value>' :
+      def.type === 'enum' ? ` <${(def.values ?? []).join('|')}>` : '';
+    const left = `  ${shortPart}${longPart}${valuePart}`;
+    const pad = Math.max(2, 30 - left.length);
+    optionLines.push(`${left}${' '.repeat(pad)}${def.description}`);
+  }
+
   console.log(`
 ${fmt.bold('aspectcode')} — generate AI-assistant knowledge bases from your codebase
 
@@ -150,24 +144,7 @@ ${fmt.bold('COMMANDS')}
   remove-exclude <path>    Remove an exclude path
 
 ${fmt.bold('OPTIONS')}
-  -r, --root <path>          Workspace root (default: cwd)
-  -o, --out <path>           Output directory override
-      --list-connections     Print dependency connections
-      --json                 Print JSON output (for automation)
-      --file <path>          Filter by file path
-      --mode <mode>          Watch mode: manual|onChange|idle
-      --kb-only              Generate KB artifacts only (skip instruction files)
-      --copilot              Enable Copilot instruction file
-      --cursor               Enable Cursor instruction file
-      --claude               Enable Claude instruction file
-      --other                Enable AGENTS.md instruction file
-      --instructions-mode <m>  Instruction mode: safe|permissive|off
-      --no-color             Disable colored output
-  -f, --force                Overwrite existing config (init)
-  -v, --verbose              Show debug output
-  -q, --quiet                Suppress non-error output
-  -h, --help                 Show this help
-  -V, --version              Print version
+${optionLines.join('\n')}
 
 ${fmt.bold('EXAMPLES')}
   aspectcode init
@@ -213,76 +190,78 @@ async function main(): Promise<void> {
   const log = createLogger({ verbose: flags.verbose, quiet: flags.quiet });
   const root = path.resolve(flags.root ?? process.cwd());
 
+  // Build shared context — loadConfig returns undefined when no aspectcode.json exists
+  const config = loadConfig(root);
+
+  const ctx: CommandContext = {
+    root,
+    flags,
+    config,
+    log,
+    positionals: parsed.positionals,
+  };
+
   let result: CommandResult;
 
   switch (command) {
     case 'init':
-      result = await runInit(root, flags, log);
+      result = await runInit(ctx);
       break;
 
     case 'generate':
     case 'gen':
-    case 'g': {
-      const config = loadConfig(root);
-      result = await runGenerate(root, flags, config, log);
+    case 'g':
+      result = await runGenerate(ctx);
       break;
-    }
 
     case 'deps': {
-      const config = loadConfig(root);
       const sub = parsed.positionals[0] ?? 'list';
       if (sub !== 'list') {
         log.error(`Unknown deps subcommand: ${fmt.bold(sub)}`);
         result = { exitCode: ExitCode.USAGE };
         break;
       }
-      result = await runDepsList(root, flags, config, log);
+      result = await runDepsList(ctx);
       break;
     }
 
-    case 'watch': {
-      const config = loadConfig(root);
-      result = await runWatch(root, flags, config, log);
+    case 'watch':
+      result = await runWatch(ctx);
       break;
-    }
 
-    case 'impact': {
-      const config = loadConfig(root);
-      result = await runImpact(root, flags, config, log);
+    case 'impact':
+      result = await runImpact(ctx);
       break;
-    }
 
-    case 'show-config': {
-      result = await runShowConfig(root, flags, log);
+    case 'show-config':
+      result = await runShowConfig(ctx);
       break;
-    }
 
     case 'set-update-rate': {
       const value = parsed.positionals[0] ?? '';
-      result = await runSetUpdateRate(root, flags, log, value);
+      result = await runSetUpdateRate(ctx, value);
       break;
     }
 
     case 'set-out-dir': {
       const value = parsed.positionals[0] ?? '';
-      result = await runSetOutDir(root, flags, log, value);
+      result = await runSetOutDir(ctx, value);
       break;
     }
 
-    case 'clear-out-dir': {
-      result = await runClearOutDir(root, flags, log);
+    case 'clear-out-dir':
+      result = await runClearOutDir(ctx);
       break;
-    }
 
     case 'add-exclude': {
       const value = parsed.positionals[0] ?? '';
-      result = await runAddExclude(root, flags, log, value);
+      result = await runAddExclude(ctx, value);
       break;
     }
 
     case 'remove-exclude': {
       const value = parsed.positionals[0] ?? '';
-      result = await runRemoveExclude(root, flags, log, value);
+      result = await runRemoveExclude(ctx, value);
       break;
     }
 

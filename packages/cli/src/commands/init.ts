@@ -12,9 +12,8 @@ import {
   defaultConfig,
   loadConfig,
 } from '../config';
-import type { CliFlags, CommandResult } from '../cli';
+import type { CliFlags, CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
-import type { Logger } from '../logger';
 import { fmt } from '../logger';
 import { printAspectCodeBanner } from './settings';
 import { runWatch } from './watch';
@@ -26,11 +25,10 @@ interface InitDeps {
 }
 
 export async function runInit(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
   deps: InitDeps = {},
 ): Promise<CommandResult> {
+  const { root, flags, log } = ctx;
   printAspectCodeBanner(log);
 
   const dest = configPath(root);
@@ -59,7 +57,7 @@ export async function runInit(
     const startWatchNow = await askYesNo('Start watch now?', false);
     if (startWatchNow) {
       const watchRunner = deps.runWatchFn ?? runWatch;
-      return await watchRunner(root, flags, config, log);
+      return await watchRunner({ root, flags, config, log, positionals: [] });
     }
   }
 

@@ -8,16 +8,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
-  discoverFiles,
   DependencyAnalyzer,
-  createNodeHostForWorkspace,
+  classifyFile,
 } from '@aspectcode/core';
-import { classifyFile } from '@aspectcode/emitters';
-import type { CliFlags, CommandResult } from '../cli';
+import type { CliFlags, CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
-import type { AspectCodeConfig } from '../config';
 import type { Logger } from '../logger';
-import { fmt, createSpinner } from '../logger';
+import { fmt } from '../logger';
+import { loadWorkspaceFiles } from '../workspace';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -30,12 +28,8 @@ interface ImpactSummary {
 
 // ── Command handler ──────────────────────────────────────────
 
-export async function runImpact(
-  root: string,
-  flags: CliFlags,
-  config: AspectCodeConfig | undefined,
-  log: Logger,
-): Promise<CommandResult> {
+export async function runImpact(ctx: CommandContext): Promise<CommandResult> {
+  const { root, flags, config, log } = ctx;
   const targetFile = flags.file;
   if (!targetFile) {
     log.error(`${fmt.bold('--file')} is required for the impact command.`);
@@ -50,40 +44,20 @@ export async function runImpact(
     return { exitCode: ExitCode.ERROR };
   }
 
-  const exclude = config?.exclude;
-
-  // Discover files.
-  const spin = createSpinner('Discovering files…', { quiet: flags.quiet });
-  const discoveredPaths = await discoverFiles(root, exclude ? { exclude } : undefined);
-  if (discoveredPaths.length === 0) {
-    spin.fail('No source files found');
+  // Discover and read files using shared helper.
+  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet });
+  if (workspace.discoveredPaths.length === 0) {
     return { exitCode: ExitCode.ERROR };
   }
-  spin.stop(`Discovered ${discoveredPaths.length} files`);
-
-  // Read file contents into cache for the analyzer.
-  const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: flags.quiet });
-  const fileContents = new Map<string, string>();
-  for (const abs of discoveredPaths) {
-    try {
-      fileContents.set(abs, fs.readFileSync(abs, 'utf-8'));
-    } catch {
-      // skip unreadable
-    }
-  }
-  spinRead.stop(`Read ${fileContents.size} files`);
 
   // Analyze dependencies.
-  const spinAnalyze = createSpinner('Analyzing dependencies…', { quiet: flags.quiet });
   const analyzer = new DependencyAnalyzer();
-  analyzer.setFileContentsCache(fileContents);
-  const host = createNodeHostForWorkspace(root);
-  const links = await analyzer.analyzeDependencies(discoveredPaths, host);
-  spinAnalyze.stop(`Found ${links.length} dependency links`);
+  analyzer.setFileContentsCache(workspace.absoluteFiles);
+  const links = await analyzer.analyzeDependencies(workspace.discoveredPaths, workspace.host);
 
   // Compute degree stats.
   const stats = new Map<string, { inDegree: number; outDegree: number }>();
-  for (const file of discoveredPaths) {
+  for (const file of workspace.discoveredPaths) {
     stats.set(file, { inDegree: 0, outDegree: 0 });
   }
   for (const link of links) {

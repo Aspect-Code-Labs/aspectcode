@@ -87,9 +87,14 @@ export function computeModelStats(
   };
 }
 
-// ── Internal ─────────────────────────────────────────────────
+// ── Hub computation ──────────────────────────────────────────
 
-function deriveHubs(edges: GraphEdge[], topN: number): HubMetric[] {
+/**
+ * Derive top-N hub files from graph edges, ranked by total degree.
+ *
+ * Also used by analysis/repo.ts when building the initial model.
+ */
+export function deriveHubs(edges: GraphEdge[], topN = 10): HubMetric[] {
   const inDeg = new Map<string, number>();
   const outDeg = new Map<string, number>();
 

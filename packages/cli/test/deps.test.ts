@@ -6,8 +6,9 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { collectConnections, runDepsList } from '../src/commands/deps';
-import type { CliFlags } from '../src/cli';
+import { collectConnections } from '../src/connections';
+import { runDepsList } from '../src/commands/deps';
+import type { CliFlags, CommandContext } from '../src/cli';
 import { createLogger } from '../src/logger';
 
 function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
@@ -26,6 +27,17 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     other: false,
     noColor: false,
     ...overrides,
+  };
+}
+
+function makeCtx(root: string, overrides: Partial<CliFlags> = {}): CommandContext {
+  const flags = makeFlags(overrides);
+  return {
+    root,
+    flags,
+    config: undefined,
+    log: createLogger({ quiet: true }),
+    positionals: [],
   };
 }
 
@@ -55,7 +67,7 @@ describe('deps command', () => {
     const rows = await collectConnections(tmpDir, undefined, log);
     assert.ok(rows.length > 0);
 
-    const hasIndexToUtils = rows.some((row) => {
+    const hasIndexToUtils = rows.some((row: { source: string; target: string }) => {
       const forward = row.source.endsWith('index.ts') && row.target.endsWith('utils.ts');
       const reverse = row.source.endsWith('utils.ts') && row.target.endsWith('index.ts');
       return forward || reverse;
@@ -65,35 +77,25 @@ describe('deps command', () => {
   });
 
   it('runDepsList returns OK on empty workspace', async () => {
-    const result = await runDepsList(tmpDir, makeFlags(), undefined, log);
+    const result = await runDepsList(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
   });
 
   it('runDepsList returns OK when dependencies exist', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runDepsList(tmpDir, makeFlags(), undefined, log);
+    const result = await runDepsList(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
   });
 
   it('runDepsList supports --file filter for matching file', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runDepsList(
-      tmpDir,
-      makeFlags({ file: 'index.ts' }),
-      undefined,
-      log,
-    );
+    const result = await runDepsList(makeCtx(tmpDir, { file: 'index.ts' }));
     assert.equal(result.exitCode, 0);
   });
 
   it('runDepsList returns usage for --file outside workspace', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runDepsList(
-      tmpDir,
-      makeFlags({ file: '../outside.ts' }),
-      undefined,
-      log,
-    );
+    const result = await runDepsList(makeCtx(tmpDir, { file: '../outside.ts' }));
     assert.equal(result.exitCode, 2);
   });
 });

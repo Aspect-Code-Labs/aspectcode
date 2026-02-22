@@ -1,37 +1,13 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import {
-  DependencyAnalyzer,
-  discoverFiles,
-  createNodeHostForWorkspace,
-} from '@aspectcode/core';
-import type { CliFlags, CommandResult } from '../cli';
+import type { CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
-import type { AspectCodeConfig } from '../config';
-import type { Logger } from '../logger';
-import { fmt, createSpinner } from '../logger';
+import { fmt } from '../logger';
+import {
+  collectConnections,
+  filterConnectionsByFile,
+} from '../connections';
 
-export interface DependencyConnection {
-  source: string;
-  target: string;
-  type: string;
-  symbols: string[];
-  lines: number[];
-  bidirectional: boolean;
-}
-
-export interface FilteredConnectionsResult {
-  connections: DependencyConnection[];
-  fileFilter?: string;
-  error?: string;
-}
-
-export async function runDepsList(
-  root: string,
-  flags: CliFlags,
-  config: AspectCodeConfig | undefined,
-  log: Logger,
-): Promise<CommandResult> {
+export async function runDepsList(ctx: CommandContext): Promise<CommandResult> {
+  const { root, flags, config, log } = ctx;
   const allConnections = await collectConnections(root, config, log);
   const filtered = filterConnectionsByFile(allConnections, root, flags.file);
   const connections = filtered.connections;
@@ -69,75 +45,4 @@ export async function runDepsList(
   log.blank();
   log.info(`${connections.length} connections listed`);
   return { exitCode: ExitCode.OK };
-}
-
-function normalizeWorkspacePath(candidate: string, root: string): string | undefined {
-  const abs = path.resolve(root, candidate);
-  const rel = path.relative(root, abs);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    return undefined;
-  }
-  return rel.replace(/\\/g, '/');
-}
-
-export function filterConnectionsByFile(
-  connections: DependencyConnection[],
-  root: string,
-  file?: string,
-): FilteredConnectionsResult {
-  if (!file) {
-    return { connections };
-  }
-
-  const fileRel = normalizeWorkspacePath(file, root);
-  if (!fileRel) {
-    return {
-      connections: [],
-      error: `--file must point to a file inside the workspace: ${fmt.bold(file)}`,
-    };
-  }
-
-  return {
-    connections: connections.filter(
-      (row) => row.source === fileRel || row.target === fileRel,
-    ),
-    fileFilter: fileRel,
-  };
-}
-
-export async function collectConnections(
-  root: string,
-  config: AspectCodeConfig | undefined,
-  log: Logger,
-): Promise<DependencyConnection[]> {
-  const spin = createSpinner('Discovering files…', { quiet: true });
-  const discoveredPaths = await discoverFiles(root, config?.exclude ? { exclude: config.exclude } : undefined);
-  if (discoveredPaths.length === 0) {
-    spin.stop('No files found');
-    return [];
-  }
-  spin.stop(`Found ${discoveredPaths.length} files`);
-
-  const cache = new Map<string, string>();
-  for (const abs of discoveredPaths) {
-    try {
-      cache.set(abs, fs.readFileSync(abs, 'utf-8'));
-    } catch {
-      log.debug(`  skip (unreadable): ${path.relative(root, abs).replace(/\\/g, '/')}`);
-    }
-  }
-
-  const analyzer = new DependencyAnalyzer();
-  analyzer.setFileContentsCache(cache);
-  const host = createNodeHostForWorkspace(root);
-  const edges = await analyzer.analyzeDependencies(discoveredPaths, host);
-
-  return edges.map((edge) => ({
-    source: path.relative(root, edge.source).replace(/\\/g, '/'),
-    target: path.relative(root, edge.target).replace(/\\/g, '/'),
-    type: edge.type,
-    symbols: edge.symbols,
-    lines: edge.lines,
-    bidirectional: edge.bidirectional,
-  }));
 }

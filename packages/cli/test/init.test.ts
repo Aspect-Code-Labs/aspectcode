@@ -8,7 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { runInit } from '../src/commands/init';
 import { CONFIG_FILE_NAME } from '../src/config';
-import type { CliFlags } from '../src/cli';
+import type { CliFlags, CommandContext } from '../src/cli';
 import { createLogger } from '../src/logger';
 
 function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
@@ -30,11 +30,20 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
   };
 }
 
+function makeCtx(root: string, overrides: Partial<CliFlags> = {}): CommandContext {
+  return {
+    root,
+    flags: makeFlags(overrides),
+    config: undefined,
+    log: createLogger({ quiet: true }),
+    positionals: [],
+  };
+}
+
 describe('init command', () => {
   let tmpDir: string;
   let stdinIsTtyDescriptor: PropertyDescriptor | undefined;
   let stdoutIsTtyDescriptor: PropertyDescriptor | undefined;
-  const log = createLogger({ quiet: true });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-init-'));
@@ -64,7 +73,7 @@ describe('init command', () => {
   });
 
   it('creates aspectcode.json', async () => {
-    const result = await runInit(tmpDir, makeFlags(), log);
+    const result = await runInit(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
 
     const cfgPath = path.join(tmpDir, CONFIG_FILE_NAME);
@@ -80,7 +89,7 @@ describe('init command', () => {
     const cfgPath = path.join(tmpDir, CONFIG_FILE_NAME);
     fs.writeFileSync(cfgPath, '{"custom": true}');
 
-    const result = await runInit(tmpDir, makeFlags(), log);
+    const result = await runInit(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
 
     // Original content preserved
@@ -92,7 +101,7 @@ describe('init command', () => {
     const cfgPath = path.join(tmpDir, CONFIG_FILE_NAME);
     fs.writeFileSync(cfgPath, '{"custom": true}');
 
-    const result = await runInit(tmpDir, makeFlags({ force: true }), log);
+    const result = await runInit(makeCtx(tmpDir, { force: true }));
     assert.equal(result.exitCode, 0);
 
     const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
@@ -104,9 +113,7 @@ describe('init command', () => {
     let watchCalls = 0;
 
     const result = await runInit(
-      tmpDir,
-      makeFlags({ quiet: false }),
-      log,
+      makeCtx(tmpDir, { quiet: false }),
       {
         runWatchFn: async () => {
           watchCalls++;

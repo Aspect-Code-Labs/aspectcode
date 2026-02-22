@@ -2,7 +2,7 @@
  * `aspectcode` settings commands.
  */
 
-import type { CliFlags, CommandResult } from '../cli';
+import type { CliFlags, CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import { loadRawConfig, saveRawConfig, type RawAspectCodeConfig } from '../config';
 import type { Logger } from '../logger';
@@ -40,10 +40,9 @@ export function printAspectCodeBanner(log: Logger): void {
 }
 
 export async function runShowConfig(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
 ): Promise<CommandResult> {
+  const { root, flags, log } = ctx;
   const command = 'show-config';
 
   try {
@@ -67,125 +66,102 @@ export async function runShowConfig(
 }
 
 export async function runSetUpdateRate(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
   value: string,
 ): Promise<CommandResult> {
-  const command = 'set-update-rate';
   const parsed = parseUpdateRate(value);
   if (!parsed) {
     return outputUsageError(
-      command,
-      flags,
-      log,
+      'set-update-rate',
+      ctx.flags,
+      ctx.log,
       `Invalid update rate: ${fmt.bold(value)}. Expected manual|onChange|idle.`,
     );
   }
 
-  try {
-    const nextConfig = updateRawConfig(root, (cfg) => {
-      cfg.updateRate = parsed;
-      delete cfg.autoRegenerateKb;
-    });
-
-    return outputSuccess(command, flags, log, nextConfig, ['updateRate', 'autoRegenerateKb']);
-  } catch (error) {
-    return outputError(command, flags, log, error);
-  }
+  return runSettingsMutation(ctx, 'set-update-rate', ['updateRate', 'autoRegenerateKb'], (cfg) => {
+    cfg.updateRate = parsed;
+    delete cfg.autoRegenerateKb;
+  });
 }
 
 export async function runSetOutDir(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
   value: string,
 ): Promise<CommandResult> {
-  const command = 'set-out-dir';
   const outDir = value.trim();
   if (!outDir) {
-    return outputUsageError(command, flags, log, `${fmt.bold('set-out-dir')} requires a non-empty path value.`);
+    return outputUsageError('set-out-dir', ctx.flags, ctx.log, `${fmt.bold('set-out-dir')} requires a non-empty path value.`);
   }
 
-  try {
-    const nextConfig = updateRawConfig(root, (cfg) => {
-      cfg.outDir = outDir;
-    });
-
-    return outputSuccess(command, flags, log, nextConfig, ['outDir']);
-  } catch (error) {
-    return outputError(command, flags, log, error);
-  }
+  return runSettingsMutation(ctx, 'set-out-dir', ['outDir'], (cfg) => {
+    cfg.outDir = outDir;
+  });
 }
 
 export async function runClearOutDir(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
 ): Promise<CommandResult> {
-  const command = 'clear-out-dir';
-
-  try {
-    const nextConfig = updateRawConfig(root, (cfg) => {
-      delete cfg.outDir;
-    });
-
-    return outputSuccess(command, flags, log, nextConfig, ['outDir']);
-  } catch (error) {
-    return outputError(command, flags, log, error);
-  }
+  return runSettingsMutation(ctx, 'clear-out-dir', ['outDir'], (cfg) => {
+    delete cfg.outDir;
+  });
 }
 
 export async function runAddExclude(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
   value: string,
 ): Promise<CommandResult> {
-  const command = 'add-exclude';
   const excludePath = value.trim();
   if (!excludePath) {
-    return outputUsageError(command, flags, log, `${fmt.bold('add-exclude')} requires a non-empty path value.`);
+    return outputUsageError('add-exclude', ctx.flags, ctx.log, `${fmt.bold('add-exclude')} requires a non-empty path value.`);
   }
 
-  try {
-    const nextConfig = updateRawConfig(root, (cfg) => {
-      const list = normalizeExcludeList(cfg.exclude);
-      if (!list.includes(excludePath)) {
-        list.push(excludePath);
-      }
-      cfg.exclude = list;
-    });
-
-    return outputSuccess(command, flags, log, nextConfig, ['exclude']);
-  } catch (error) {
-    return outputError(command, flags, log, error);
-  }
+  return runSettingsMutation(ctx, 'add-exclude', ['exclude'], (cfg) => {
+    const list = normalizeExcludeList(cfg.exclude);
+    if (!list.includes(excludePath)) {
+      list.push(excludePath);
+    }
+    cfg.exclude = list;
+  });
 }
 
 export async function runRemoveExclude(
-  root: string,
-  flags: CliFlags,
-  log: Logger,
+  ctx: CommandContext,
   value: string,
 ): Promise<CommandResult> {
-  const command = 'remove-exclude';
   const excludePath = value.trim();
   if (!excludePath) {
-    return outputUsageError(command, flags, log, `${fmt.bold('remove-exclude')} requires a non-empty path value.`);
+    return outputUsageError('remove-exclude', ctx.flags, ctx.log, `${fmt.bold('remove-exclude')} requires a non-empty path value.`);
   }
 
-  try {
-    const nextConfig = updateRawConfig(root, (cfg) => {
-      const list = normalizeExcludeList(cfg.exclude).filter((entry) => entry !== excludePath);
-      if (list.length > 0) {
-        cfg.exclude = list;
-      } else {
-        delete cfg.exclude;
-      }
-    });
+  return runSettingsMutation(ctx, 'remove-exclude', ['exclude'], (cfg) => {
+    const list = normalizeExcludeList(cfg.exclude).filter((entry) => entry !== excludePath);
+    if (list.length > 0) {
+      cfg.exclude = list;
+    } else {
+      delete cfg.exclude;
+    }
+  });
+}
 
-    return outputSuccess(command, flags, log, nextConfig, ['exclude']);
+// ── Shared mutation runner ───────────────────────────────────
+
+/**
+ * Generic helper for settings mutation commands.
+ *
+ * Encapsulates the try/catch + load → mutate → save → output pattern
+ * shared by all mutation commands.
+ */
+function runSettingsMutation(
+  ctx: CommandContext,
+  command: string,
+  changed: string[],
+  mutate: (config: RawAspectCodeConfig) => void,
+): CommandResult {
+  const { root, flags, log } = ctx;
+  try {
+    const nextConfig = updateRawConfig(root, mutate);
+    return outputSuccess(command, flags, log, nextConfig, changed);
   } catch (error) {
     return outputError(command, flags, log, error);
   }

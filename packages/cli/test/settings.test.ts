@@ -6,7 +6,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { CliFlags } from '../src/cli';
+import type { CliFlags, CommandContext } from '../src/cli';
 import { createLogger } from '../src/logger';
 import { CONFIG_FILE_NAME } from '../src/config';
 import {
@@ -34,6 +34,16 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     claude: false,
     other: false,
     ...overrides,
+  };
+}
+
+function makeCtx(root: string, overrides: Partial<CliFlags> = {}): CommandContext {
+  return {
+    root,
+    flags: makeFlags(overrides),
+    config: undefined,
+    log: createLogger({ quiet: true }),
+    positionals: [],
   };
 }
 
@@ -67,7 +77,6 @@ async function captureJsonOutput(fn: () => Promise<unknown>): Promise<unknown> {
 
 describe('settings commands', () => {
   let tmpDir: string;
-  const log = createLogger({ quiet: true });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-settings-'));
@@ -84,7 +93,7 @@ describe('settings commands', () => {
       exclude: ['dist'],
     });
 
-    const result = await runSetUpdateRate(tmpDir, makeFlags(), log, 'idle');
+    const result = await runSetUpdateRate(makeCtx(tmpDir), 'idle');
     assert.equal(result.exitCode, 0);
 
     const cfg = readConfig(tmpDir);
@@ -100,13 +109,13 @@ describe('settings commands', () => {
       custom: 123,
     });
 
-    let result = await runSetOutDir(tmpDir, makeFlags(), log, '.aspect');
+    let result = await runSetOutDir(makeCtx(tmpDir), '.aspect');
     assert.equal(result.exitCode, 0);
     let cfg = readConfig(tmpDir);
     assert.equal(cfg.outDir, '.aspect');
     assert.equal(cfg.custom, 123);
 
-    result = await runClearOutDir(tmpDir, makeFlags(), log);
+    result = await runClearOutDir(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
     cfg = readConfig(tmpDir);
     assert.equal(cfg.outDir, undefined);
@@ -116,21 +125,21 @@ describe('settings commands', () => {
   it('add-exclude and remove-exclude manage the exclude list', async () => {
     writeConfig(tmpDir, { exclude: ['dist'], custom: 'ok' });
 
-    let result = await runAddExclude(tmpDir, makeFlags(), log, 'coverage');
+    let result = await runAddExclude(makeCtx(tmpDir), 'coverage');
     assert.equal(result.exitCode, 0);
-    result = await runAddExclude(tmpDir, makeFlags(), log, 'dist');
+    result = await runAddExclude(makeCtx(tmpDir), 'dist');
     assert.equal(result.exitCode, 0);
 
     let cfg = readConfig(tmpDir);
     assert.deepEqual(cfg.exclude, ['dist', 'coverage']);
 
-    result = await runRemoveExclude(tmpDir, makeFlags(), log, 'dist');
+    result = await runRemoveExclude(makeCtx(tmpDir), 'dist');
     assert.equal(result.exitCode, 0);
     cfg = readConfig(tmpDir);
     assert.deepEqual(cfg.exclude, ['coverage']);
     assert.equal(cfg.custom, 'ok');
 
-    result = await runRemoveExclude(tmpDir, makeFlags(), log, 'coverage');
+    result = await runRemoveExclude(makeCtx(tmpDir), 'coverage');
     assert.equal(result.exitCode, 0);
     cfg = readConfig(tmpDir);
     assert.equal(cfg.exclude, undefined);
@@ -143,7 +152,7 @@ describe('settings commands', () => {
     });
 
     const showPayload = await captureJsonOutput(async () => {
-      await runShowConfig(tmpDir, makeFlags({ json: true }), log);
+      await runShowConfig(makeCtx(tmpDir, { json: true }));
     }) as { ok: boolean; command: string; config: Record<string, unknown> };
 
     assert.equal(showPayload.ok, true);
@@ -152,7 +161,7 @@ describe('settings commands', () => {
     assert.equal(showPayload.config.autoRegenerateKb, 'onSave');
 
     const setPayload = await captureJsonOutput(async () => {
-      await runSetUpdateRate(tmpDir, makeFlags({ json: true }), log, 'manual');
+      await runSetUpdateRate(makeCtx(tmpDir, { json: true }), 'manual');
     }) as { ok: boolean; command: string; config: Record<string, unknown> };
 
     assert.equal(setPayload.ok, true);

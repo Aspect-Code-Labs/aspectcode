@@ -4,8 +4,11 @@
  * All functions are pure (no I/O, no vscode).
  */
 
-import { toPosix } from '@aspectcode/core';
+import { makeRelativePath } from '@aspectcode/core';
 import { splitLines, truncationFooter } from './policy';
+
+// Re-export makeRelativePath so internal consumers don't need to change.
+export { makeRelativePath };
 
 /**
  * Trim content to stay within a line budget, preserving structure.
@@ -31,20 +34,6 @@ export function enforceLineBudget(
   const truncated = lines.slice(0, truncateAt);
   truncated.push(...truncationFooter(maxLines, lines.length - truncateAt, generatedAt));
   return truncated.join('\n');
-}
-
-/**
- * Convert an absolute path to a workspace-relative posix path.
- */
-export function makeRelativePath(absPath: string, workspaceRoot: string): string {
-  const normalizedAbs = toPosix(absPath);
-  const normalizedRoot = toPosix(workspaceRoot).replace(/\/$/, '');
-  if (normalizedAbs.startsWith(normalizedRoot)) {
-    return normalizedAbs.substring(normalizedRoot.length).replace(/^\//, '');
-  }
-  // Fallback: return the basename
-  const parts = normalizedAbs.split('/');
-  return parts[parts.length - 1];
 }
 
 /**

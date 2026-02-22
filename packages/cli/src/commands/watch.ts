@@ -1,10 +1,8 @@
 import * as path from 'path';
-import chokidar from 'chokidar';
 import { SUPPORTED_EXTENSIONS } from '@aspectcode/core';
-import type { CliFlags, CommandResult } from '../cli';
+import type { CliFlags, CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import type { AspectCodeConfig } from '../config';
-import type { Logger } from '../logger';
 import { fmt } from '../logger';
 import { runGenerate } from './generate';
 
@@ -48,12 +46,11 @@ function isIgnoredPath(filePath: string): boolean {
   return IGNORED_SEGMENTS.some((seg) => normalized.includes(seg));
 }
 
-export async function runWatch(
-  root: string,
-  flags: CliFlags,
-  config: AspectCodeConfig | undefined,
-  log: Logger,
-): Promise<CommandResult> {
+export async function runWatch(ctx: CommandContext): Promise<CommandResult> {
+  const { root, flags, config, log } = ctx;
+  const chokidarModule = await import('chokidar');
+  // Handle both ESM default export and CJS module shapes
+  const chokidar = chokidarModule.default ?? chokidarModule;
   const mode = resolveWatchMode(flags, config);
   const exts = SUPPORTED_EXTENSIONS.map((ext) => ext.slice(1)).join(',');
 
@@ -93,7 +90,7 @@ export async function runWatch(
     running = true;
     try {
       log.info(`${fmt.bold('watch')} trigger: ${reason}`);
-      await runGenerate(root, { ...flags, listConnections: false, json: false }, config, log);
+      await runGenerate({ root, flags: { ...flags, listConnections: false, json: false }, config, log, positionals: [] });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`watch regeneration failed: ${msg}`);

@@ -23,3 +23,20 @@ export function toPosix(p: string): string {
     .replace(/\/\/+/g, '/')
     .replace(/^\.\//, '');
 }
+
+/**
+ * Convert an absolute path to a workspace-relative posix path.
+ *
+ * If the path starts with `workspaceRoot` the prefix is stripped; otherwise
+ * the filename (basename) is returned as a fallback.
+ */
+export function makeRelativePath(absPath: string, workspaceRoot: string): string {
+  const normalizedAbs = toPosix(absPath);
+  const normalizedRoot = toPosix(workspaceRoot).replace(/\/$/, '');
+  if (normalizedAbs.startsWith(normalizedRoot)) {
+    return normalizedAbs.substring(normalizedRoot.length).replace(/^\//, '');
+  }
+  // Fallback: return the basename
+  const parts = normalizedAbs.split('/');
+  return parts[parts.length - 1];
+}

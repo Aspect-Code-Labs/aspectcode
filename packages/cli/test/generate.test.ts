@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runGenerate } from '../src/commands/generate';
-import type { CliFlags } from '../src/cli';
+import type { CliFlags, CommandContext } from '../src/cli';
 import { createLogger } from '../src/logger';
 
 function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
@@ -29,6 +29,16 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
   };
 }
 
+function makeCtx(root: string, overrides: Partial<CliFlags> = {}): CommandContext {
+  return {
+    root,
+    flags: makeFlags(overrides),
+    config: undefined,
+    log: createLogger({ quiet: true }),
+    positionals: [],
+  };
+}
+
 function writeSourceFiles(dir: string): void {
   // Create a small TypeScript project for analysis
   fs.writeFileSync(
@@ -43,7 +53,6 @@ function writeSourceFiles(dir: string): void {
 
 describe('generate command', () => {
   let tmpDir: string;
-  const log = createLogger({ quiet: true });
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-gen-'));
@@ -56,7 +65,7 @@ describe('generate command', () => {
   it('generates KB artifacts for a small project', async () => {
     writeSourceFiles(tmpDir);
 
-    const result = await runGenerate(tmpDir, makeFlags(), undefined, log);
+    const result = await runGenerate(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
     assert.ok(result.report);
     assert.ok(result.report.wrote.length > 0);
@@ -72,7 +81,7 @@ describe('generate command', () => {
 
   it('returns error for empty project', async () => {
     // No files in tmpDir
-    const result = await runGenerate(tmpDir, makeFlags(), undefined, log);
+    const result = await runGenerate(makeCtx(tmpDir));
     assert.equal(result.exitCode, 1);
   });
 
@@ -80,12 +89,7 @@ describe('generate command', () => {
     writeSourceFiles(tmpDir);
     const outDir = path.join(tmpDir, 'output');
 
-    const result = await runGenerate(
-      tmpDir,
-      makeFlags({ out: outDir }),
-      undefined,
-      log,
-    );
+    const result = await runGenerate(makeCtx(tmpDir, { out: outDir }));
     assert.equal(result.exitCode, 0);
 
     // KB artifacts under output/.aspect
@@ -96,7 +100,7 @@ describe('generate command', () => {
   it('writes AGENTS.md instructions by default', async () => {
     writeSourceFiles(tmpDir);
 
-    const result = await runGenerate(tmpDir, makeFlags(), undefined, log);
+    const result = await runGenerate(makeCtx(tmpDir));
     assert.equal(result.exitCode, 0);
     assert.ok(result.report);
 
@@ -107,7 +111,7 @@ describe('generate command', () => {
   it('report contains stats', async () => {
     writeSourceFiles(tmpDir);
 
-    const result = await runGenerate(tmpDir, makeFlags(), undefined, log);
+    const result = await runGenerate(makeCtx(tmpDir));
     assert.ok(result.report);
     assert.equal(typeof result.report.stats.files, 'number');
     assert.ok(result.report.stats.files >= 2);
@@ -119,12 +123,7 @@ describe('generate command', () => {
 
   it('supports --list-connections', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runGenerate(
-      tmpDir,
-      makeFlags({ listConnections: true }),
-      undefined,
-      log,
-    );
+    const result = await runGenerate(makeCtx(tmpDir, { listConnections: true }));
     assert.equal(result.exitCode, 0);
     assert.ok(result.report);
   });
@@ -139,7 +138,7 @@ describe('generate command', () => {
     };
 
     try {
-      const result = await runGenerate(tmpDir, makeFlags({ json: true }), undefined, log);
+      const result = await runGenerate(makeCtx(tmpDir, { json: true }));
       assert.equal(result.exitCode, 0);
       assert.ok(result.report);
     } finally {
@@ -171,12 +170,7 @@ describe('generate command', () => {
     };
 
     try {
-      const result = await runGenerate(
-        tmpDir,
-        makeFlags({ json: true, file: 'index.ts' }),
-        undefined,
-        log,
-      );
+      const result = await runGenerate(makeCtx(tmpDir, { json: true, file: 'index.ts' }));
       assert.equal(result.exitCode, 0);
     } finally {
       console.log = originalLog;
@@ -197,12 +191,7 @@ describe('generate command', () => {
 
   it('returns usage for --file outside workspace when listing connections', async () => {
     writeSourceFiles(tmpDir);
-    const result = await runGenerate(
-      tmpDir,
-      makeFlags({ listConnections: true, file: '../outside.ts' }),
-      undefined,
-      log,
-    );
+    const result = await runGenerate(makeCtx(tmpDir, { listConnections: true, file: '../outside.ts' }));
     assert.equal(result.exitCode, 2);
   });
 });
