@@ -120,6 +120,7 @@
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --outfile=dist/extension.js --external:vscode --watch",
     "compile": "npm run build",
     "test:e2e": "mocha --require ts-node/register --ui tdd \"src/test/**/*.test.ts\"",
+    "test:integration:cli-adapter": "mocha --require ts-node/register --ui tdd \"src/test/cliAdapter.test.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ --max-warnings 200",
     "lint:fix": "eslint src/ --fix --max-warnings 200",

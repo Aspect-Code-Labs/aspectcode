@@ -109,6 +109,23 @@ node packages/cli/bin/aspectcode.js remove-exclude dist
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Extension layering rules, file size limits |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, PR process |
 
+## CI and Test Tiers
+
+- **PR CI** (`.github/workflows/ci-pr.yml`)
+  - `packages/cli` tests
+  - `packages/emitters` tests
+  - extension CLI adapter integration test
+  - Windows sandbox CLI smoke tests
+- **Nightly CI** (`.github/workflows/nightly-cli-repos.yml`)
+  - Multi-repo cross-language CLI matrix
+
+Local equivalents:
+
+```bash
+npm run test:ci:pr
+npm run test:ci:repos
+```
+
 ## Releases
 
 Pushing a tag like `v0.1.1` creates a GitHub Release with the `.vsix`

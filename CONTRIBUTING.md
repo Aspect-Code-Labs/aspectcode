@@ -130,6 +130,29 @@ The test matrix per repo covers:
 All cloned repos are deleted after testing. Use `-SkipCleanup` to keep
 them for inspection.
 
+## CI Test Tiers
+
+Aspect Code now uses two CI tiers for CLI reliability:
+
+- **PR CI (`.github/workflows/ci-pr.yml`)**
+   - Ubuntu: `packages/cli` + `packages/emitters` tests
+   - Ubuntu: extension CLI adapter integration test
+   - Windows: sandbox CLI smoke tests (`test:cli:fast`)
+- **Nightly CI (`.github/workflows/nightly-cli-repos.yml`)**
+   - Windows: exhaustive multi-repo matrix (`test:cli:repos:fast`)
+
+To reproduce PR CI locally:
+
+```bash
+npm run test:ci:pr
+```
+
+To reproduce nightly multi-repo CI locally:
+
+```bash
+npm run test:ci:repos
+```
+
 ## What to Work On
 
 - Bug fixes and reliability improvements

@@ -44,7 +44,7 @@ describe('watch command', () => {
     assert.equal(mode, 'manual');
   });
 
-  it('does not run on startup and regenerates after change', async function () {
+  it('does not run on startup, regenerates for source changes, and ignores excluded paths', async function () {
     this.timeout(30000);
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-watch-'));
@@ -85,6 +85,33 @@ describe('watch command', () => {
       await waitForOutput(proc, /watch\s+trigger:/i, 15000);
       await waitForCondition(() => fs.existsSync(manifestPath), 15000, 100);
       assert.equal(fs.existsSync(manifestPath), true, 'watch should regenerate after file change');
+
+      await sleep(2500);
+      const manifestMtimeAfterSource = fs.statSync(manifestPath).mtimeMs;
+
+      const ignoredNodeModulesDir = path.join(tmpDir, 'node_modules', 'pkg');
+      fs.mkdirSync(ignoredNodeModulesDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(ignoredNodeModulesDir, 'ignored.ts'),
+        `export const ignored = true;\n`,
+        'utf-8',
+      );
+
+      const ignoredAspectDir = path.join(tmpDir, '.aspect');
+      fs.mkdirSync(ignoredAspectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(ignoredAspectDir, 'ignored.ts'),
+        `export const ignored = true;\n`,
+        'utf-8',
+      );
+
+      await sleep(3000);
+      const manifestMtimeAfterIgnored = fs.statSync(manifestPath).mtimeMs;
+      assert.equal(
+        manifestMtimeAfterIgnored,
+        manifestMtimeAfterSource,
+        'watch should ignore changes under node_modules/ and .aspect/',
+      );
     } finally {
       await stopProcess(proc);
       fs.rmSync(tmpDir, { recursive: true, force: true });

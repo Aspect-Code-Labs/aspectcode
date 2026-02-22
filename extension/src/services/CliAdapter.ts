@@ -11,7 +11,7 @@
  *   2. npm link / global: `aspectcode` on PATH
  */
 
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 
