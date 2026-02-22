@@ -1,5 +1,5 @@
 {
-  "name": "aspectcode",
+  "name": "aspectcode-vscode",
   "displayName": "Aspect Code",
   "description": "AI-powered static analysis with Tree-sitter for AI assistant integration",
   "version": "0.1.4",
@@ -48,40 +48,10 @@
     "onStartupFinished"
   ],
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "aspectcode-container",
-          "title": "Aspect Code",
-          "icon": "media/icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "aspectcode-container": [
-        {
-          "type": "webview",
-          "id": "aspectcode.panel",
-          "name": "Extension Panel",
-          "icon": "$(beaker)"
-        }
-      ]
-    },
     "commands": [
       {
         "command": "aspectcode.toggleExtensionEnabled",
         "title": "Aspect Code: Toggle Enabled"
-      },
-
-      {
-        "command": "aspectcode.generateKB",
-        "title": "Aspect Code: Generate Knowledge Base",
-        "icon": "$(database)"
-      },
-      {
-        "command": "aspectcode.copyImpactAnalysisCurrentFile",
-        "title": "Aspect Code: Copy Impact Analysis for Current File",
-        "icon": "$(clippy)"
       },
       {
         "command": "aspectcode.configureAssistants",
@@ -89,59 +59,24 @@
         "icon": "$(sparkle)"
       },
       {
-        "command": "aspectcode.generateInstructionFiles",
-        "title": "Aspect Code: Generate Instruction Files",
+        "command": "aspectcode.generate",
+        "title": "Aspect Code: Generate",
         "icon": "$(book)"
-      },
-      {
-        "command": "aspectcode.stopIgnoringGeneratedFiles",
-        "title": "Aspect Code: Stop ignoring generated files"
-      },
-      {
-        "command": "aspectcode.enableSafeMode",
-        "title": "Aspect Code: Enable Safe Mode"
-      },
-      {
-        "command": "aspectcode.enablePermissiveMode",
-        "title": "Aspect Code: Enable Permissive Mode"
-      },
-      {
-        "command": "aspectcode.enableCustomMode",
-        "title": "Aspect Code: Enable Custom Mode"
-      },
-      {
-        "command": "aspectcode.enableOffMode",
-        "title": "Aspect Code: Disable Instruction Files"
-      },
-      {
-        "command": "aspectcode.editCustomInstructions",
-        "title": "Aspect Code: Edit Custom Instructions"
-      },
-      {
-        "command": "aspectcode.copyKbReceiptPrompt",
-        "title": "Aspect Code: Copy KB Receipt Prompt"
       }
     ],
     "configuration": {
       "type": "object",
       "title": "Aspect Code",
       "properties": {
-        "aspectcode.autoRegenerateKb": {
-          "type": "string",
-          "enum": ["off", "onSave", "idle"],
-          "default": "onSave",
-          "description": "Auto-regenerate KB files: 'off' = manual only, 'onSave' = regenerate on file save (debounced), 'idle' = regenerate after 30s of inactivity"
-        },
-        "aspectcode.instructions.mode": {
-          "type": "string",
-          "enum": ["safe", "permissive", "custom", "off"],
-          "default": "safe",
-          "description": "Instruction generation mode: 'safe' is more restrictive; 'permissive' is shorter and less restrictive; 'custom' uses .aspect/instructions.md; 'off' disables instruction file generation."
+        "aspectcode.suppressSetupPrompt": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, Aspect Code will never prompt you to set up new repositories. Individual repos can also be dismissed from the prompt itself."
         },
         "aspectcode.devLogs": {
           "type": "boolean",
           "default": false,
-          "description": "Enable verbose panel logs for debugging"
+          "description": "Enable verbose extension logs for debugging"
         }
       }
     }
@@ -154,20 +89,33 @@
     "watch": "npm run watch:extension",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --outfile=dist/extension.js --external:vscode --watch",
     "compile": "npm run build",
-    "test:e2e": "ts-node ./test/e2e/run.ts"
+    "test:e2e": "mocha --require ts-node/register --ui tdd \"src/test/**/*.test.ts\"",
+    "test:integration:cli-adapter": "mocha --require ts-node/register --ui tdd \"src/test/cliAdapter.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ --max-warnings 200",
+    "lint:fix": "eslint src/ --fix --max-warnings 200",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "check:filesize": "node scripts/check-file-size.mjs",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check:all": "npm run lint && npm run format:check && npm run check:filesize && npm run check:boundaries"
   },
   "devDependencies": {
     "@types/diff": "^5.2.2",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.92.0",
-    "@vscode/test-electron": "^2.3.8",
-    "chai": "^4.4.1",
     "esbuild": "^0.21.5",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
     "mocha": "^10.4.0",
+    "prettier": "^3.3.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.0"
   },
   "dependencies": {
+    "@aspectcode/core": "*",
+    "@aspectcode/emitters": "*",
     "diff": "^5.2.0",
     "tree-sitter-wasms": "0.1.13",
     "web-tree-sitter": "^0.21.0",

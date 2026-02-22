@@ -45,9 +45,9 @@ Python, TypeScript, JavaScript, Java, C#
 | Mode | Description |
 |------|-------------|
 | **Safe** | Full guardrails — explicit rules for testing, imports, error handling |
-| **Permissive** | Minimal rules — trusts the AI to follow KB context |
-| **Custom** | User-provided `.aspect/instructions.md` inserted into generated files |
-| **Off** | No instruction files generated |
+
+The extension enforces safe-only mode. The CLI (`aspectcode generate --instructions-mode`)
+supports additional modes (`permissive`, `off`) for advanced workflows.
 
 ---
 
@@ -67,15 +67,15 @@ Python, TypeScript, JavaScript, Java, C#
 | Command | Description |
 |---------|-------------|
 | Configure AI Assistants | Generate KB and instruction files |
-| Copy Impact Analysis | Copy dependency impact for current file |
 | Copy KB Receipt Prompt | Copy prompt to verify AI can read KB |
-| Enable Safe/Permissive/Custom/Off Mode | Switch instruction generation mode |
+| Enable Safe Mode | Ensure instruction files use safe mode |
 
 ---
 
 ## Requirements
 
 - VS Code 1.92.0 or higher
+- **Works fully offline** — no internet connection required
 
 ---
 

@@ -1,16 +1,16 @@
 /**
  * FileDiscoveryService - Centralized, coordinated file discovery
- * 
+ *
  * This service provides THE SINGLE SOURCE OF TRUTH for discovered workspace files.
  * All components (KB generation, fingerprinting, dependency graph, etc.) should
  * use this service instead of calling discoverSourceFiles directly.
- * 
+ *
  * Key features:
  * - Singleton instance per workspace (created once at activation)
  * - Caches discovered files and invalidates based on fingerprint changes
  * - Stores computed exclusions in .aspect/.settings.json (not auto field)
  * - Provides coordinated access to file lists across all components
- * 
+ *
  * This eliminates the redundant file discovery that was running 2-3x per operation.
  */
 
@@ -19,6 +19,14 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import type { ExclusionSettings } from './DirectoryExclusion';
 import { readAspectSettings, updateAspectSettings } from './aspectSettings';
+import {
+  PACKAGE_MANAGER_DIRS,
+  CACHE_DIRS,
+  VCS_IDE_DIRS,
+  GENERATED_DIRS,
+  VENV_MARKERS,
+  BUILD_OUTPUT_MARKERS,
+} from '@aspectcode/core';
 
 // ============================================================================
 // Types
@@ -45,131 +53,30 @@ export interface ComputedExclusions {
 }
 
 // ============================================================================
-// Default Exclusion Patterns (by category)
-// ============================================================================
-
-/** Package manager directories - always exclude by name */
-const PACKAGE_MANAGER_DIRS = [
-  'node_modules',
-  'bower_components',
-  'jspm_packages',
-  'vendor',
-  'packages',
-  'site-packages',
-  'dist-packages',
-  'eggs',
-  '.eggs',
-];
-
-/** Build output directories - exclude by name */
-const BUILD_OUTPUT_DIRS = [
-  'dist',
-  'build',
-  'out',
-  'output',
-  'target',
-  'bin',
-  'obj',
-  'lib',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  '.parcel-cache',
-  '.webpack',
-  '.rollup.cache',
-];
-
-/** Virtual environment directories - exclude by name or marker */
-const VENV_DIRS = [
-  'venv',
-  '.venv',
-  'env',
-  '.env',
-  'virtualenv',
-  '.virtualenv',
-  '.tox',
-  '.nox',
-  '.conda',
-];
-
-/** Cache directories - always exclude */
-const CACHE_DIRS = [
-  '__pycache__',
-  '.cache',
-  '.pytest_cache',
-  '.mypy_cache',
-  '.ruff_cache',
-  '.hypothesis',
-  'coverage',
-  'htmlcov',
-  '.nyc_output',
-  '.coverage',
-];
-
-/** VCS and IDE directories - always exclude */
-const VCS_IDE_DIRS = [
-  '.git',
-  '.hg',
-  '.svn',
-  '.idea',
-  '.vs',
-  '.vscode',
-];
-
-/** Test framework output directories */
-const TEST_OUTPUT_DIRS = [
-  'e2e',
-  'playwright-report',
-  'test-results',
-  'cypress',
-  '.playwright',
-];
-
-/** Generated/framework directories */
-const GENERATED_DIRS = [
-  '.aspect',
-  'generated',
-  '__generated__',
-  '.serverless',
-  '.terraform',
-  '.pulumi',
-];
-
-/** Marker files for venv detection */
-const VENV_MARKERS = ['pyvenv.cfg', 'pip-selfcheck.json'];
-
-/** Marker files for build output detection */
-const BUILD_OUTPUT_MARKERS = ['.tsbuildinfo', '.buildinfo'];
-
-// ============================================================================
 // FileDiscoveryService
 // ============================================================================
 
 export class FileDiscoveryService implements vscode.Disposable {
   private workspaceRoot: vscode.Uri;
   private outputChannel?: vscode.OutputChannel;
-  
+
   // Cached state
   private cachedResult: FileDiscoveryResult | null = null;
   private cachedExclusions: ComputedExclusions | null = null;
   private discoveryInFlight: Promise<FileDiscoveryResult> | null = null;
-  
+
   // Change tracking
   private fileWatcherDisposable: vscode.Disposable | null = null;
   private isDirty: boolean = true;
-  
+
   // Event emitter for when files change
   private readonly _onFilesChanged = new vscode.EventEmitter<void>();
   readonly onFilesChanged = this._onFilesChanged.event;
 
-  constructor(
-    workspaceRoot: vscode.Uri,
-    outputChannel?: vscode.OutputChannel
-  ) {
+  constructor(workspaceRoot: vscode.Uri, outputChannel?: vscode.OutputChannel) {
     this.workspaceRoot = workspaceRoot;
     this.outputChannel = outputChannel;
-    
+
     // Set up file watchers to mark cache as dirty
     this.setupFileWatchers();
   }
@@ -200,15 +107,15 @@ export class FileDiscoveryService implements vscode.Disposable {
     if (this.cachedResult && !this.isDirty) {
       return this.cachedResult;
     }
-    
+
     // If discovery is already in flight, wait for it
     if (this.discoveryInFlight) {
       return this.discoveryInFlight;
     }
-    
+
     // Start new discovery
     this.discoveryInFlight = this.performDiscovery();
-    
+
     try {
       const result = await this.discoveryInFlight;
       this.cachedResult = result;
@@ -229,59 +136,27 @@ export class FileDiscoveryService implements vscode.Disposable {
   }
 
   /**
-   * Get cached files if available (no discovery if cache is empty).
-   * Useful for best-effort access without triggering expensive operations.
-   */
-  getCachedFiles(): string[] | null {
-    return this.cachedResult?.files ?? null;
-  }
-
-  /**
-   * Get cached fingerprint if available.
-   */
-  getCachedFingerprint(): string | null {
-    return this.cachedResult?.fingerprint ?? null;
-  }
-
-  /**
    * Get computed exclusions. Computes once and caches, stores in settings.
    */
   async getExclusions(): Promise<ComputedExclusions> {
     if (this.cachedExclusions) {
       return this.cachedExclusions;
     }
-    
+
     // Try to load from settings first
     const fromSettings = await this.loadExclusionsFromSettings();
     if (fromSettings) {
       this.cachedExclusions = fromSettings;
       return fromSettings;
     }
-    
+
     // Compute fresh exclusions
     const exclusions = await this.computeExclusions();
     this.cachedExclusions = exclusions;
-    
+
     // Save to settings (async, non-blocking)
     void this.saveExclusionsToSettings(exclusions);
-    
-    return exclusions;
-  }
 
-  /**
-   * Force recomputation of exclusions (e.g., when user changes settings).
-   */
-  async recomputeExclusions(): Promise<ComputedExclusions> {
-    this.cachedExclusions = null;
-    const exclusions = await this.computeExclusions();
-    this.cachedExclusions = exclusions;
-    
-    // Save to settings
-    await this.saveExclusionsToSettings(exclusions);
-    
-    // Mark files as dirty since exclusions changed
-    this.invalidate();
-    
     return exclusions;
   }
 
@@ -291,26 +166,33 @@ export class FileDiscoveryService implements vscode.Disposable {
 
   private async performDiscovery(): Promise<FileDiscoveryResult> {
     const startTime = Date.now();
-    
+
     // Get exclusions (from cache or compute)
     const exclusions = await this.getExclusions();
-    
+
     this.outputChannel?.appendLine(
-      `[FileDiscovery] Using exclusion glob: ${exclusions.excludeGlob.substring(0, 100)}...`
+      `[FileDiscovery] Using exclusion glob: ${exclusions.excludeGlob.substring(0, 100)}...`,
     );
 
     // Common source code file patterns
     const patterns = [
       '**/*.py',
-      '**/*.ts', '**/*.tsx',
-      '**/*.js', '**/*.jsx', '**/*.mjs', '**/*.cjs',
+      '**/*.ts',
+      '**/*.tsx',
+      '**/*.js',
+      '**/*.jsx',
+      '**/*.mjs',
+      '**/*.cjs',
       '**/*.java',
-      '**/*.cpp', '**/*.c', '**/*.hpp', '**/*.h',
+      '**/*.cpp',
+      '**/*.c',
+      '**/*.hpp',
+      '**/*.h',
       '**/*.cs',
       '**/*.go',
       '**/*.rs',
       '**/*.rb',
-      '**/*.php'
+      '**/*.php',
     ];
 
     // Also respect VS Code's files.exclude and search.exclude settings
@@ -328,14 +210,18 @@ export class FileDiscoveryService implements vscode.Disposable {
 
     // Build directory names to exclude from settings
     const excludeNames = settingsExcludes
-      .map(p => {
-        const normalized = p.replace(/\*\*\//g, '').replace(/\/\*\*/g, '').replace(/^\*+/, '').replace(/\*+$/, '');
+      .map((p) => {
+        const normalized = p
+          .replace(/\*\*\//g, '')
+          .replace(/\/\*\*/g, '')
+          .replace(/^\*+/, '')
+          .replace(/\*+$/, '');
         return normalized.toLowerCase();
       })
-      .filter(p => p.length > 2 && !p.includes('*'));
+      .filter((p) => p.length > 2 && !p.includes('*'));
 
     this.outputChannel?.appendLine(
-      `[FileDiscovery] Additional excludeNames from settings: ${excludeNames.join(', ')}`
+      `[FileDiscovery] Additional excludeNames from settings: ${excludeNames.join(', ')}`,
     );
 
     const allFiles = new Set<string>();
@@ -347,7 +233,7 @@ export class FileDiscoveryService implements vscode.Disposable {
         const files = await vscode.workspace.findFiles(
           new vscode.RelativePattern(this.workspaceRoot, pattern),
           exclusions.excludeGlob,
-          maxResultsPerPattern
+          maxResultsPerPattern,
         );
         return files;
       } catch (error) {
@@ -362,7 +248,8 @@ export class FileDiscoveryService implements vscode.Disposable {
       for (const file of fileList) {
         const filePath = file.fsPath.toLowerCase();
         // Filter out files matching settings excludes
-        const excluded = excludeNames.length > 0 && excludeNames.some(name => filePath.includes(name));
+        const excluded =
+          excludeNames.length > 0 && excludeNames.some((name) => filePath.includes(name));
         if (!excluded) {
           allFiles.add(file.fsPath);
         }
@@ -371,17 +258,17 @@ export class FileDiscoveryService implements vscode.Disposable {
 
     const files = Array.from(allFiles).sort();
     const fingerprint = this.computeListFingerprint(files);
-    
+
     const elapsed = Date.now() - startTime;
     this.outputChannel?.appendLine(
-      `[FileDiscovery] Found ${files.length} source files in ${elapsed}ms`
+      `[FileDiscovery] Found ${files.length} source files in ${elapsed}ms`,
     );
 
     return {
       files,
       fingerprint,
       fileCount: files.length,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     };
   }
 
@@ -400,21 +287,21 @@ export class FileDiscoveryService implements vscode.Disposable {
 
   private async computeExclusions(): Promise<ComputedExclusions> {
     const startTime = Date.now();
-    
+
     // Load user settings for overrides
     const settings = await this.loadExclusionSettingsFromAspect();
-    const neverSet = new Set((settings?.never ?? []).map(p => p.replace(/\\/g, '/')));
-    const alwaysSet = new Set((settings?.always ?? []).map(p => p.replace(/\\/g, '/')));
-    
+    const neverSet = new Set((settings?.never ?? []).map((p) => p.replace(/\\/g, '/')));
+    const alwaysSet = new Set((settings?.always ?? []).map((p) => p.replace(/\\/g, '/')));
+
     const excludedDirs: string[] = [];
-    
+
     // Add user's always-exclude list
     for (const dir of alwaysSet) {
       if (!neverSet.has(dir)) {
         excludedDirs.push(dir);
       }
     }
-    
+
     // Add name-based exclusions (fast)
     const nameBasedDirs = this.getNameBasedExclusions();
     for (const dir of nameBasedDirs) {
@@ -422,7 +309,7 @@ export class FileDiscoveryService implements vscode.Disposable {
         excludedDirs.push(dir);
       }
     }
-    
+
     // Add marker-based exclusions (slightly slower, checks filesystem)
     const markerBasedDirs = await this.detectMarkerBasedExclusions();
     for (const dir of markerBasedDirs) {
@@ -430,18 +317,18 @@ export class FileDiscoveryService implements vscode.Disposable {
         excludedDirs.push(dir);
       }
     }
-    
+
     const excludeGlob = this.buildExcludeGlob(excludedDirs);
-    
+
     const elapsed = Date.now() - startTime;
     this.outputChannel?.appendLine(
-      `[FileDiscovery] Computed exclusions: ${excludedDirs.length} dirs in ${elapsed}ms`
+      `[FileDiscovery] Computed exclusions: ${excludedDirs.length} dirs in ${elapsed}ms`,
     );
 
     return {
       excludeGlob,
       excludedDirs,
-      computedAt: Date.now()
+      computedAt: Date.now(),
     };
   }
 
@@ -452,9 +339,18 @@ export class FileDiscoveryService implements vscode.Disposable {
       ...VCS_IDE_DIRS,
       ...GENERATED_DIRS,
       // Only include unambiguous build/venv dirs
-      '.next', '.nuxt', '.output', '.turbo', '.parcel-cache',
-      '__pycache__', '.pytest_cache', '.mypy_cache',
-      'venv', '.venv', '.tox', '.nox',
+      '.next',
+      '.nuxt',
+      '.output',
+      '.turbo',
+      '.parcel-cache',
+      '__pycache__',
+      '.pytest_cache',
+      '.mypy_cache',
+      'venv',
+      '.venv',
+      '.tox',
+      '.nox',
     ];
   }
 
@@ -486,7 +382,7 @@ export class FileDiscoveryService implements vscode.Disposable {
 
   private async hasVenvMarker(dirName: string): Promise<boolean> {
     const dirPath = path.join(this.workspaceRoot.fsPath, dirName);
-    
+
     for (const marker of VENV_MARKERS) {
       try {
         const markerPath = vscode.Uri.file(path.join(dirPath, marker));
@@ -518,7 +414,7 @@ export class FileDiscoveryService implements vscode.Disposable {
 
   private async hasBuildOutputMarker(dirName: string): Promise<boolean> {
     const dirPath = path.join(this.workspaceRoot.fsPath, dirName);
-    
+
     for (const marker of BUILD_OUTPUT_MARKERS) {
       try {
         const markerPath = vscode.Uri.file(path.join(dirPath, marker));
@@ -539,7 +435,7 @@ export class FileDiscoveryService implements vscode.Disposable {
       } catch {
         // No package.json
       }
-      
+
       try {
         const tsConfig = vscode.Uri.file(path.join(this.workspaceRoot.fsPath, 'tsconfig.json'));
         await vscode.workspace.fs.stat(tsConfig);
@@ -556,9 +452,9 @@ export class FileDiscoveryService implements vscode.Disposable {
     if (dirs.length === 0) {
       return '';
     }
-    
+
     // Escape special glob characters and build pattern
-    const escaped = dirs.map(d => d.replace(/[{}[\]()]/g, '\\$&'));
+    const escaped = dirs.map((d) => d.replace(/[{}[\]()]/g, '\\$&'));
     return `**/{${escaped.join(',')}}/**`;
   }
 
@@ -583,14 +479,14 @@ export class FileDiscoveryService implements vscode.Disposable {
           excludeGlob: string;
           excludedDirs: string[];
           computedAt: number;
-        }
+        };
       };
-      
+
       if (computed?._computed?.excludeGlob) {
         return {
           excludeGlob: computed._computed.excludeGlob,
           excludedDirs: computed._computed.excludedDirs,
-          computedAt: computed._computed.computedAt
+          computedAt: computed._computed.computedAt,
         };
       }
     } catch {
@@ -603,7 +499,7 @@ export class FileDiscoveryService implements vscode.Disposable {
     try {
       const settings = await readAspectSettings(this.workspaceRoot);
       const current = settings.excludeDirectories ?? {};
-      
+
       // Store computed exclusions alongside user settings
       await updateAspectSettings(this.workspaceRoot, {
         excludeDirectories: {
@@ -614,9 +510,9 @@ export class FileDiscoveryService implements vscode.Disposable {
           _computed: {
             excludeGlob: exclusions.excludeGlob,
             excludedDirs: exclusions.excludedDirs,
-            computedAt: exclusions.computedAt
-          }
-        } as ExclusionSettings & { _computed: any }
+            computedAt: exclusions.computedAt,
+          },
+        } as ExclusionSettings & { _computed: any },
       });
     } catch (e) {
       this.outputChannel?.appendLine(`[FileDiscovery] Failed to save exclusions to settings: ${e}`);
@@ -630,17 +526,17 @@ export class FileDiscoveryService implements vscode.Disposable {
   private setupFileWatchers(): void {
     // Watch for file creates/deletes/renames to invalidate cache
     const watcher = vscode.workspace.createFileSystemWatcher('**/*');
-    
+
     const markDirty = () => {
       this.isDirty = true;
       this._onFilesChanged.fire();
     };
-    
+
     watcher.onDidCreate(markDirty);
     watcher.onDidDelete(markDirty);
     // Note: onDidChange fires for content changes, but we don't need to
     // rediscover files for content changes - only structure changes
-    
+
     this.fileWatcherDisposable = watcher;
   }
 }
@@ -657,7 +553,7 @@ let _instance: FileDiscoveryService | null = null;
  */
 export function initFileDiscoveryService(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): FileDiscoveryService {
   if (_instance) {
     _instance.dispose();

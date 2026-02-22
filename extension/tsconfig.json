@@ -9,7 +9,18 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+
+    // Phase 0 — extra strictness
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitOverride": true
   },
-  "exclude": ["src/panel/webview/**", "test/**"]
+  "exclude": ["src/panel/webview/**", "test/**"],
+  "references": [
+    { "path": "../packages/core" },
+    { "path": "../packages/emitters" }
+  ]
 }

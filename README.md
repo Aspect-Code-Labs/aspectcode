@@ -10,251 +10,127 @@
 
 ## Overview
 
-This repo contains the VS Code extension.
+Aspect Code generates a project-local knowledge base (`.aspect/` directory)
+that helps AI coding assistants understand your codebase before making changes.
+It works as a VS Code extension or a standalone CLI — both produce identical
+output. **Everything runs offline** with zero network dependencies.
 
-Development happens in the open on GitHub, and contributions are welcome.
-See CONTRIBUTING.md for how to propose changes.
-
-- Marketplace/end-user README: see extension/README.md
+- Marketplace/end-user README: see `extension/README.md`
 - Docs: https://aspectcode.com/docs
 
 ## Install
 
-- VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=aspectcode.aspectcode
-- Or download the `.vsix` from the GitHub Release for a tag (see below) and install via "Extensions: Install from VSIX…"
+### VS Code Extension
+
+- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=aspectcode.aspectcode)
+- Or download the `.vsix` from the GitHub Release and install via
+  "Extensions: Install from VSIX…"
+
+### CLI
+
+```bash
+# From the repo root (npm workspaces)
+npm install
+npm run build --workspaces
+node packages/cli/bin/aspectcode.js --help
+```
 
 ## Features
 
-- **Knowledge Base generation** — Writes `.aspect/architecture.md`, `.aspect/map.md`, and `.aspect/context.md`
-- **AI instruction files** — Generates assistant-friendly instruction files for Copilot, Cursor, Claude, AGENTS.md
-- **Dependency visualization** — Interactive graph in the sidebar panel
-- **Incremental updates** — Regenerates on save/idle (configurable via `.aspect/.settings.json`)
+- **Knowledge Base generation** — Writes `.aspect/architecture.md`, `.aspect/map.md`, `.aspect/context.md`, and `.aspect/manifest.json`
+- **AI instruction files** — Generates assistant-specific instruction files for Copilot, Cursor, Claude, AGENTS.md
+- **Dependency analysis** — Import/export/call graph with hub detection
+- **Incremental updates** — Regenerates on save / idle (extension), on file changes with `watch` (CLI), or on-demand
+- **Fully offline** — No telemetry, no API calls, no network access
 
 ## Supported Languages
 
-Primary support: Python, TypeScript, JavaScript, Java, C#
+Python, TypeScript, JavaScript, Java, C#
 
 ---
 
-## Architecture
+## Repository Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        VS Code Extension                        │
-├─────────────────────────────────────────────────────────────────┤
-│  extension.ts                                                   │
-│  ├── Activation & lifecycle                                     │
-│  ├── File watchers (KB staleness, settings refresh)             │
-│  └── Tree-sitter grammar initialization                         │
-├─────────────────────────────────────────────────────────────────┤
-│  commandHandlers.ts                                             │
-│  ├── Command registration (configureAssistants, modes, etc.)   │
-│  └── File watchers (instruction files, assistant configs)       │
-├─────────────────────────────────────────────────────────────────┤
-│  panel/PanelProvider.ts                                         │
-│  ├── Sidebar webview UI (inline HTML/JS)                        │
-│  ├── Dependency graph visualization                             │
-│  └── Settings controls                                          │
-├─────────────────────────────────────────────────────────────────┤
-│  assistants/                                                    │
-│  ├── kb.ts           → KB file generation (architecture/map/    │
-│  │                     context.md with strict line budgets)     │
-│  ├── instructions.ts → Instruction file generation              │
-│  │                     (safe/permissive/custom modes)           │
-│  └── detection.ts    → Auto-detect installed AI assistants      │
-├─────────────────────────────────────────────────────────────────┤
-│  services/                                                      │
-│  ├── DependencyAnalyzer.ts   → Import/export/call graph         │
-│  ├── FileDiscoveryService.ts → Cached workspace file discovery  │
-│  ├── WorkspaceFingerprint.ts → KB staleness detection           │
-│  ├── aspectSettings.ts       → .aspect/.settings.json I/O       │
-│  ├── DirectoryExclusion.ts   → Glob exclusion patterns          │
-│  └── gitignoreService.ts     → .gitignore management            │
-└─────────────────────────────────────────────────────────────────┘
+aspectcode/
+├── packages/
+│   ├── core/        @aspectcode/core      Pure analysis engine
+│   ├── emitters/    @aspectcode/emitters   Artifact generation
+│   └── cli/         aspectcode             CLI entry point
+├── extension/                              VS Code extension
+└── docs/                                   Architecture & guides
 ```
 
----
+See [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) for the
+full architecture, data flow, and package API reference.
 
-## File Structure
+## Quick Start (Development)
 
-```
-extension/
-├── src/
-│   ├── extension.ts           # Entry point, activation, file watchers
-│   ├── commandHandlers.ts     # Command registration and handlers
-│   ├── state.ts               # Panel state management
-│   ├── tsParser.ts            # Tree-sitter grammar loading
-│   ├── importExtractors.ts    # Tree-sitter import/symbol extraction
-│   │
-│   ├── assistants/
-│   │   ├── kb.ts              # KB generation (4k+ lines)
-│   │   │                      # Generates architecture.md, map.md, context.md
-│   │   │                      # Strict line budgets (200/300/200) for AI context
-│   │   ├── instructions.ts    # Instruction file generation
-│   │   │                      # Modes: safe, permissive, custom, off
-│   │   │                      # Inserts between <!-- ASPECT:BEGIN/END --> markers
-│   │   └── detection.ts       # Auto-detect AI assistants by config files
-│   │
-│   ├── panel/
-│   │   └── PanelProvider.ts   # Sidebar webview (5k+ lines)
-│   │                          # Inline HTML/JS, dependency graph, settings UI
-│   │
-│   ├── services/
-│   │   ├── DependencyAnalyzer.ts    # Import/export/call graph (1.2k lines)
-│   │   │                            # Pre-built indexes for O(1) lookups
-│   │   ├── FileDiscoveryService.ts  # Cached file discovery (700 lines)
-│   │   │                            # Single source of truth for workspace files
-│   │   ├── WorkspaceFingerprint.ts  # KB staleness detection (450 lines)
-│   │   │                            # Stores .aspect/.fingerprint.json
-│   │   ├── aspectSettings.ts        # .aspect/.settings.json read/write
-│   │   ├── DirectoryExclusion.ts    # Exclusion glob patterns
-│   │   ├── gitignoreService.ts      # .gitignore management
-│   │   └── enablementCancellation.ts # Cancellation token utilities
-│   │
-│   └── test/
-│       └── kb.test.ts         # KB generation tests
-│
-├── parsers/                   # Tree-sitter WASM grammars
-├── media/                     # Icons and assets
-├── scripts/                   # Build scripts
-├── package.json               # Extension manifest
-└── tsconfig.json
+```bash
+npm install                     # install all workspace deps
+npm run build --workspaces      # build core → emitters → cli
+npm test --workspaces           # run all 149 tests
 ```
 
----
-
-## Key Components
-
-### KB Generation (`assistants/kb.ts`)
-
-Generates three markdown files with strict line budgets to fit within AI context windows:
-
-| File | Budget | Content |
-|------|--------|--------|
-| `architecture.md` | 200 lines | High-risk hubs, directory tree, entry points |
-| `map.md` | 300 lines | Data models, symbol index, naming conventions |
-| `context.md` | 200 lines | Module clusters, external integrations, data flows |
-
-### Instruction Generation (`assistants/instructions.ts`)
-
-Generates instruction files with content between `<!-- ASPECT:BEGIN -->` and `<!-- ASPECT:END -->` markers. User content outside markers is preserved on regeneration.
-
-| Mode | Behavior |
-|------|----------|
-| Safe | Full guardrails — testing, imports, error handling rules |
-| Permissive | Minimal rules — trusts AI to follow KB context |
-| Custom | User-provided `.aspect/instructions.md` content |
-| Off | No instruction files |
-
-### Dependency Analysis (`services/DependencyAnalyzer.ts`)
-
-Analyzes imports, exports, calls, and inheritance relationships. Builds pre-indexed maps for:
-- Files importing a given file
-- Files imported by a given file
-- Circular dependency detection
-- Hub file identification (high in-degree)
-
-### Workspace Fingerprint (`services/WorkspaceFingerprint.ts`)
-
-Tracks KB staleness using a cheap fingerprint (file paths + mtime + size). Supports auto-regeneration on save or after idle period.
-
----
-
-## Extension Flows
-
-### Activation (when VS Code opens workspace)
-
-```
-activate()
-├── Create output channel + status bar
-├── Initialize AspectCodeState, load persisted state
-├── Register PanelProvider webview
-├── Migrate settings (.vscode/settings.json → .aspect/.settings.json)
-├── Initialize FileDiscoveryService singleton
-├── Initialize WorkspaceFingerprint
-│   └── Set up KB regeneration callback
-├── Set up file watchers:
-│   ├── .aspect/.settings.json → refresh KB mode
-│   ├── Source files (*.ts, *.py, etc.) → staleness detection
-│   └── Instruction files → UI updates
-├── Check if KB is stale on startup
-└── activateCommands() → register all commands
-```
-
-### File Change Detection
-
-File watchers monitor workspace changes:
-
-| Watcher | Pattern | Purpose |
-|---------|---------|---------|
-| Source files | `*.{ts,tsx,js,py,...}` | KB staleness via WorkspaceFingerprint |
-| .aspect/ | `**/.aspect{,/**}` | UI updates, instruction file detection |
-| Instruction files | `**/{AGENTS,CLAUDE}.md` | Assistant detection |
-| Config folders | `.github/`, `.cursor/` | Assistant config detection |
-
-On source file change:
-1. `onDidSave` → `WorkspaceFingerprint.checkStaleAndRegenerateIfNeeded()`
-2. If stale + autoRegenerate enabled → debounced `regenerateEverything()`
-3. Panel receives staleness state update
-
-### KB Generation Flow
-
-```
-User clicks "+" or "Regenerate" (or auto-save triggers)
-         ↓
-regenerateEverything() [kb.ts]
-├── Check if .aspect/ exists (skip if not)
-├── Load tree-sitter grammars (cached)
-├── discoverWorkspaceFiles() via FileDiscoveryService
-├── preloadFileContents() → Map<string, string>
-├── getDetailedDependencyData() via DependencyAnalyzer
-└── PARALLEL generation:
-    ├── generateArchitectureFile() → .aspect/architecture.md
-    ├── generateMapFile() → .aspect/map.md
-    └── generateContextFile() → .aspect/context.md
-         ↓
-workspaceFingerprint.markKbFresh()
-         ↓
-panelProvider.refreshDependencyGraph()
-```
-
-### Data Storage
-
-| Storage | Location | Data |
-|---------|----------|------|
-| VS Code globalState | Extension storage | Panel state, first-run flag |
-| VS Code workspaceState | Workspace storage | Notification suppressions |
-| `.aspect/.settings.json` | Workspace | autoRegenerateKb, instructions.mode, enabled, assistants |
-| `.aspect/.fingerprint.json` | Workspace | KB staleness (hash, timestamp, file count) |
-| In-memory caches | Runtime | File contents, parsers, dependency graph, discovered files |
-
----
-
-## Development
-
-Build the extension:
+### Extension Development
 
 ```bash
 cd extension
-npm install
 npm run build
+# Press F5 in VS Code to launch Extension Development Host
 ```
 
-Package a VSIX locally:
+### CLI Usage
 
 ```bash
-cd extension
-npx --yes @vscode/vsce package --pre-release
+node packages/cli/bin/aspectcode.js init         # create aspectcode.json
+node packages/cli/bin/aspectcode.js generate      # build KB artifacts
+node packages/cli/bin/aspectcode.js generate -v   # verbose output
+node packages/cli/bin/aspectcode.js generate --kb-only  # KB only, skip instructions
+node packages/cli/bin/aspectcode.js generate --copilot --cursor  # specific assistants
+node packages/cli/bin/aspectcode.js generate --list-connections --file src/app.ts
+node packages/cli/bin/aspectcode.js impact --file src/app.ts   # impact analysis
+node packages/cli/bin/aspectcode.js deps list --file src/app.ts
+node packages/cli/bin/aspectcode.js watch         # watch + regenerate on changes
+node packages/cli/bin/aspectcode.js watch --mode idle
+node packages/cli/bin/aspectcode.js show-config
+node packages/cli/bin/aspectcode.js set-update-rate idle
+node packages/cli/bin/aspectcode.js set-out-dir .aspect
+node packages/cli/bin/aspectcode.js clear-out-dir
+node packages/cli/bin/aspectcode.js add-exclude dist
+node packages/cli/bin/aspectcode.js remove-exclude dist
+```
+
+## Key Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | System architecture, package APIs, data flow |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Extension layering rules, file size limits |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, PR process |
+
+## CI and Test Tiers
+
+- **PR CI** (`.github/workflows/ci-pr.yml`)
+  - `packages/cli` tests
+  - `packages/emitters` tests
+  - extension CLI adapter integration test
+  - Windows sandbox CLI smoke tests
+- **Nightly CI** (`.github/workflows/nightly-cli-repos.yml`)
+  - Multi-repo cross-language CLI matrix
+
+Local equivalents:
+
+```bash
+npm run test:ci:pr
+npm run test:ci:repos
 ```
 
 ## Releases
 
-Pushing a tag like `v0.1.1` creates a GitHub Release with the `.vsix` attached (via .github/workflows/release.yml).
-
-If you prefer installing from a file, open the GitHub Release for the tag and download the `.vsix` from the **Assets** section.
+Pushing a tag like `v0.1.1` creates a GitHub Release with the `.vsix`
+attached (via `.github/workflows/release.yml`).
 
 ## License
 
 See LICENSE.md.
-
-

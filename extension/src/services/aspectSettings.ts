@@ -1,7 +1,7 @@
 /**
  * Aspect Settings Service
- * 
- * Manages user preferences stored in .aspect/.settings.json.
+ *
+ * Manages user preferences stored in aspectcode.json.
  * This keeps Aspect Code settings local to the project (not in .vscode/settings.json)
  * and allows per-file gitignore opt-in decisions.
  */
@@ -12,8 +12,9 @@ import type { ExclusionSettings } from './DirectoryExclusion';
 // Re-export ExclusionSettings for consumers
 export type { ExclusionSettings } from './DirectoryExclusion';
 
-export type InstructionsMode = 'safe' | 'permissive' | 'custom' | 'off';
-export type AutoRegenerateKbMode = 'off' | 'onSave' | 'idle';
+export type InstructionsMode = 'safe' | 'custom' | 'off';
+type UpdateRateMode = 'manual' | 'onChange' | 'idle';
+export type AutoRegenerateKbMode = UpdateRateMode | 'off' | 'onSave';
 
 export interface AssistantsSettings {
   copilot?: boolean;
@@ -31,18 +32,18 @@ export type GitignoreTarget =
   | '.github/copilot-instructions.md'
   | '.cursor/rules/aspectcode.mdc';
 
-export const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
+const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
   '.aspect/',
   'AGENTS.md',
   'CLAUDE.md',
   '.github/copilot-instructions.md',
-  '.cursor/rules/aspectcode.mdc'
+  '.cursor/rules/aspectcode.mdc',
 ];
 
 /**
- * Schema for .aspect/.settings.json
+ * Schema for aspectcode.json
  */
-export interface AspectSettings {
+interface AspectSettings {
   /**
    * Per-target gitignore preferences.
    * true = add to .gitignore (keep local)
@@ -52,20 +53,24 @@ export interface AspectSettings {
   gitignore?: {
     [target in GitignoreTarget]?: boolean;
   };
-  
+
   /**
    * Assistant enablement (mirrors aspectcode.assistants.* but stored locally)
    */
   assistants?: AssistantsSettings;
 
   /**
-   * Auto-regenerate KB files.
-   * Mirrors aspectcode.autoRegenerateKb.
+   * Update trigger mode.
    */
-  autoRegenerateKb?: AutoRegenerateKbMode;
-  
+  updateRate?: UpdateRateMode;
+
   /**
-   * Instructions mode: 'safe' or 'permissive'
+   * Legacy key (kept for backward compatibility with older configs).
+   */
+  autoRegenerateKb?: 'off' | 'onSave' | 'idle';
+
+  /**
+   * Instructions mode: 'safe' or 'custom'
    */
   instructionsMode?: InstructionsMode;
 
@@ -82,7 +87,7 @@ export interface AspectSettings {
   excludeDirectories?: ExclusionSettings;
 }
 
-const SETTINGS_FILENAME = '.settings.json';
+const SETTINGS_FILENAME = 'aspectcode.json';
 
 const SETTINGS_CACHE_TTL_MS = 250;
 const SETTINGS_CACHE = new Map<string, { loadedAtMs: number; settings: AspectSettings }>();
@@ -92,38 +97,32 @@ function cacheKey(workspaceRoot: vscode.Uri): string {
 }
 
 function normalizeInstructionsMode(value: unknown): InstructionsMode | undefined {
-  return value === 'permissive' || value === 'safe' || value === 'custom' || value === 'off'
-    ? value
-    : undefined;
+  if (value === 'safe' || value === 'custom' || value === 'off') return value;
+  return undefined;
 }
 
-function normalizeAutoRegenerateKbMode(value: unknown): AutoRegenerateKbMode | undefined {
-  return value === 'off' || value === 'onSave' || value === 'idle' ? value : undefined;
-}
-
-/**
- * Check if the .aspect/ directory exists in the workspace.
- * Used to prevent auto-creation of settings when KB hasn't been generated yet.
- */
-export async function aspectDirExists(workspaceRoot: vscode.Uri): Promise<boolean> {
-  try {
-    const aspectDir = vscode.Uri.joinPath(workspaceRoot, '.aspect');
-    await vscode.workspace.fs.stat(aspectDir);
-    return true;
-  } catch {
-    return false;
+function normalizeAutoRegenerateKbMode(value: unknown): UpdateRateMode | undefined {
+  if (value === 'manual' || value === 'onChange' || value === 'idle') {
+    return value;
   }
+  if (value === 'off') {
+    return 'manual';
+  }
+  if (value === 'onSave') {
+    return 'onChange';
+  }
+  return undefined;
 }
 
 /**
- * Get the path to the .aspect/.settings.json file for a workspace
+ * Get the path to aspectcode.json for a workspace
  */
 function getSettingsPath(workspaceRoot: vscode.Uri): vscode.Uri {
-  return vscode.Uri.joinPath(workspaceRoot, '.aspect', SETTINGS_FILENAME);
+  return vscode.Uri.joinPath(workspaceRoot, SETTINGS_FILENAME);
 }
 
 /**
- * Read settings from .aspect/.settings.json
+ * Read settings from aspectcode.json
  * Returns empty object if file doesn't exist or is invalid
  */
 export async function readAspectSettings(workspaceRoot: vscode.Uri): Promise<AspectSettings> {
@@ -133,7 +132,7 @@ export async function readAspectSettings(workspaceRoot: vscode.Uri): Promise<Asp
   if (cached && Date.now() - cached.loadedAtMs < SETTINGS_CACHE_TTL_MS) {
     return cached.settings;
   }
-  
+
   try {
     const content = await vscode.workspace.fs.readFile(settingsPath);
     const text = Buffer.from(content).toString('utf8');
@@ -149,86 +148,88 @@ export async function readAspectSettings(workspaceRoot: vscode.Uri): Promise<Asp
 }
 
 /**
- * Write settings to .aspect/.settings.json
- * Creates .aspect/ directory if it doesn't exist
+ * Write settings to aspectcode.json
  */
-export async function writeAspectSettings(
+async function writeAspectSettings(
   workspaceRoot: vscode.Uri,
-  settings: AspectSettings
+  settings: AspectSettings,
 ): Promise<void> {
-  const aspectDir = vscode.Uri.joinPath(workspaceRoot, '.aspect');
   const settingsPath = getSettingsPath(workspaceRoot);
-  
-  // Ensure .aspect/ directory exists
-  try {
-    await vscode.workspace.fs.createDirectory(aspectDir);
-  } catch {
-    // Directory may already exist
-  }
-  
+
   const content = JSON.stringify(settings, null, 2) + '\n';
   await vscode.workspace.fs.writeFile(settingsPath, Buffer.from(content, 'utf8'));
 
   SETTINGS_CACHE.set(cacheKey(workspaceRoot), { loadedAtMs: Date.now(), settings });
 }
 
-export interface UpdateAspectSettingsOptions {
+interface UpdateAspectSettingsOptions {
   /**
-   * If false, skip the update if .aspect/ directory doesn't exist.
-   * This prevents auto-creating .aspect/.settings.json on startup or toggle
-   * when KB hasn't been explicitly generated yet.
+   * If false, skip the update if aspectcode.json doesn't exist.
    * Default: true (create if missing for backwards compat)
    */
   createIfMissing?: boolean;
 }
 
 /**
- * Update a specific setting in .aspect/.settings.json
+ * Update a specific setting in aspectcode.json
  * Merges with existing settings
  */
 export async function updateAspectSettings(
   workspaceRoot: vscode.Uri,
   update: Partial<AspectSettings>,
-  options: UpdateAspectSettingsOptions = {}
+  options: UpdateAspectSettingsOptions = {},
 ): Promise<AspectSettings | null> {
   const { createIfMissing = true } = options;
-  
-  // If createIfMissing is false, check if .aspect/ exists first
+
+  // If createIfMissing is false, check if settings file exists first.
   if (!createIfMissing) {
-    const exists = await aspectDirExists(workspaceRoot);
+    const settingsPath = getSettingsPath(workspaceRoot);
+    let exists = true;
+    try {
+      await vscode.workspace.fs.stat(settingsPath);
+    } catch {
+      exists = false;
+    }
     if (!exists) {
-      return null; // Skip - don't create .aspect/ implicitly
+      return null; // Skip - don't create config implicitly
     }
   }
-  
+
   const existing = await readAspectSettings(workspaceRoot);
-  
+
   // Deep merge for nested objects
   const merged: AspectSettings = {
     ...existing,
     ...update,
     gitignore: {
       ...existing.gitignore,
-      ...update.gitignore
+      ...update.gitignore,
     },
     assistants: {
       ...existing.assistants,
-      ...update.assistants
+      ...update.assistants,
     },
     excludeDirectories: {
       ...existing.excludeDirectories,
-      ...update.excludeDirectories
+      ...update.excludeDirectories,
     },
+    updateRate:
+      update.updateRate ??
+      normalizeAutoRegenerateKbMode(update.autoRegenerateKb) ??
+      existing.updateRate ??
+      normalizeAutoRegenerateKbMode(existing.autoRegenerateKb),
     autoRegenerateKb: update.autoRegenerateKb ?? existing.autoRegenerateKb,
     instructionsMode: update.instructionsMode ?? existing.instructionsMode,
-    extensionEnabled: update.extensionEnabled ?? existing.extensionEnabled
+    extensionEnabled: update.extensionEnabled ?? existing.extensionEnabled,
   };
-  
+
   await writeAspectSettings(workspaceRoot, merged);
   return merged;
 }
 
-async function readVSCodeWorkspaceSettingsJson(workspaceRoot: vscode.Uri): Promise<Record<string, unknown> | null> {
+async function readVSCodeWorkspaceSettingsJson(
+  workspaceRoot: vscode.Uri,
+): Promise<Record<string, unknown> | null> {
   const settingsPath = vscode.Uri.joinPath(workspaceRoot, '.vscode', 'settings.json');
   try {
     const bytes = await vscode.workspace.fs.readFile(settingsPath);
@@ -244,13 +245,20 @@ async function readVSCodeWorkspaceSettingsJson(workspaceRoot: vscode.Uri): Promi
 }
 
 /**
- * One-time-ish migration: copy selected aspectcode.* settings from .vscode/settings.json
- * into .aspect/.settings.json (only when the .aspect setting is not already set).
+ * One-shot migration: copy selected aspectcode.* settings from .vscode/settings.json
+ * into aspectcode.json. Runs at most once per workspace (guarded by globalState flag).
  */
 export async function migrateAspectSettingsFromVSCode(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
+  globalState?: vscode.Memento,
 ): Promise<boolean> {
+  // Guard: skip if migration already completed for this workspace
+  const MIGRATION_DONE_KEY = 'aspectcode.migrationDone';
+  if (globalState?.get<boolean>(MIGRATION_DONE_KEY, false)) {
+    return false;
+  }
+
   const vsSettings = await readVSCodeWorkspaceSettingsJson(workspaceRoot);
   if (!vsSettings) return false;
 
@@ -268,11 +276,11 @@ export async function migrateAspectSettingsFromVSCode(
     }
   }
 
-  // autoRegenerateKb mode
-  if (current.autoRegenerateKb === undefined) {
+  // updateRate mode
+  if (current.updateRate === undefined) {
     const migrated = normalizeAutoRegenerateKbMode(vsSettings['aspectcode.autoRegenerateKb']);
     if (migrated) {
-      update.autoRegenerateKb = migrated;
+      update.updateRate = migrated;
       changed = true;
     }
   }
@@ -283,7 +291,7 @@ export async function migrateAspectSettingsFromVSCode(
     'cursor',
     'claude',
     'other',
-    'autoGenerate'
+    'autoGenerate',
   ];
 
   const currentAssistants = current.assistants ?? {};
@@ -300,55 +308,58 @@ export async function migrateAspectSettingsFromVSCode(
     update.assistants = assistantUpdate;
   }
 
-  if (!changed) return false;
-
-  // Only write if .aspect/ already exists - don't create it during migration
-  const dirExists = await aspectDirExists(workspaceRoot);
-  if (!dirExists) {
+  if (!changed) {
+    // No settings to migrate — mark complete so we never re-check
+    await globalState?.update(MIGRATION_DONE_KEY, true);
     return false;
   }
 
   await updateAspectSettings(workspaceRoot, update);
-  outputChannel?.appendLine('[Settings] Migrated Aspect Code settings from .vscode/settings.json to .aspect/.settings.json');
+  await globalState?.update(MIGRATION_DONE_KEY, true);
+  outputChannel?.appendLine(
+    '[Settings] Migrated Aspect Code settings from .vscode/settings.json to aspectcode.json',
+  );
   return true;
 }
 
 export async function getInstructionsModeSetting(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<InstructionsMode> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
+  // Auto-detect .aspect/instructions.md → custom mode
+  try {
+    const customPath = vscode.Uri.joinPath(workspaceRoot, '.aspect', 'instructions.md');
+    await vscode.workspace.fs.stat(customPath);
+    return 'custom';
+  } catch {
+    // File doesn't exist — fall through
+  }
+
+  // Read persisted value from aspectcode.json (default: 'safe')
   const settings = await readAspectSettings(workspaceRoot);
-  return normalizeInstructionsMode(settings.instructionsMode) ?? 'safe';
+  return settings.instructionsMode ?? 'safe';
 }
 
-export async function setInstructionsModeSetting(
+export async function getUpdateRateSetting(
   workspaceRoot: vscode.Uri,
-  mode: InstructionsMode
-): Promise<void> {
-  await updateAspectSettings(workspaceRoot, { instructionsMode: mode });
-}
-
-export async function getAutoRegenerateKbSetting(
-  workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<AutoRegenerateKbMode> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
   const settings = await readAspectSettings(workspaceRoot);
-  return normalizeAutoRegenerateKbMode(settings.autoRegenerateKb) ?? 'onSave';
+  return (
+    settings.updateRate ?? normalizeAutoRegenerateKbMode(settings.autoRegenerateKb) ?? 'onChange'
+  );
 }
 
-export async function setAutoRegenerateKbSetting(
+export async function setUpdateRateSetting(
   workspaceRoot: vscode.Uri,
   mode: AutoRegenerateKbMode,
-  options: UpdateAspectSettingsOptions = {}
+  options: UpdateAspectSettingsOptions = {},
 ): Promise<void> {
-  await updateAspectSettings(workspaceRoot, { autoRegenerateKb: mode }, options);
+  const normalized = normalizeAutoRegenerateKbMode(mode) ?? 'onChange';
+  await updateAspectSettings(workspaceRoot, { updateRate: normalized }, options);
 }
 
-export async function getExtensionEnabledSetting(
-  workspaceRoot: vscode.Uri
-): Promise<boolean> {
+export async function getExtensionEnabledSetting(workspaceRoot: vscode.Uri): Promise<boolean> {
   const settings = await readAspectSettings(workspaceRoot);
   // Default enabled
   return settings.extensionEnabled !== false;
@@ -357,16 +368,15 @@ export async function getExtensionEnabledSetting(
 export async function setExtensionEnabledSetting(
   workspaceRoot: vscode.Uri,
   enabled: boolean,
-  options: UpdateAspectSettingsOptions = {}
+  options: UpdateAspectSettingsOptions = {},
 ): Promise<void> {
   await updateAspectSettings(workspaceRoot, { extensionEnabled: enabled }, options);
 }
 
 export async function getAssistantsSettings(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<Required<AssistantsSettings>> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
   const settings = await readAspectSettings(workspaceRoot);
   const a = settings.assistants ?? {};
   return {
@@ -374,7 +384,7 @@ export async function getAssistantsSettings(
     cursor: a.cursor ?? false,
     claude: a.claude ?? false,
     other: a.other ?? false,
-    autoGenerate: a.autoGenerate ?? false
+    autoGenerate: a.autoGenerate ?? false,
   };
 }
 
@@ -384,7 +394,7 @@ export async function getAssistantsSettings(
  */
 export async function getGitignorePreference(
   workspaceRoot: vscode.Uri,
-  target: GitignoreTarget
+  target: GitignoreTarget,
 ): Promise<boolean | undefined> {
   const settings = await readAspectSettings(workspaceRoot);
   return settings.gitignore?.[target];
@@ -396,19 +406,19 @@ export async function getGitignorePreference(
 export async function setGitignorePreference(
   workspaceRoot: vscode.Uri,
   target: GitignoreTarget,
-  addToGitignore: boolean
+  addToGitignore: boolean,
 ): Promise<void> {
   await updateAspectSettings(workspaceRoot, {
     gitignore: {
-      [target]: addToGitignore
-    }
+      [target]: addToGitignore,
+    },
   });
 }
 
 /**
  * User-friendly descriptions for each gitignore target
  */
-export function getTargetDescription(target: GitignoreTarget): string {
+function getTargetDescription(target: GitignoreTarget): string {
   switch (target) {
     case '.aspect/':
       return 'the Aspect Code knowledge base (.aspect/)';
@@ -432,34 +442,36 @@ export function getTargetDescription(target: GitignoreTarget): string {
 export async function promptGitignorePreference(
   workspaceRoot: vscode.Uri,
   target: GitignoreTarget,
-  outputChannel?: vscode.OutputChannel
+  outputChannel?: vscode.OutputChannel,
 ): Promise<boolean | undefined> {
   const description = getTargetDescription(target);
-  
+
   const result = await vscode.window.showInformationMessage(
     `Keep ${description} local? Adding to .gitignore prevents it from being committed to git.`,
     { modal: false },
     'Keep Local (add to .gitignore)',
-    'Allow Commit (don\'t add)'
+    "Allow Commit (don't add)",
   );
-  
-  // If user dismissed without choosing, don't persist and return undefined
+
+  // If user dismissed without choosing, default to Allow Commit (false) so we
+  // stop re-prompting. This matches the "default to NOT gitignoring" policy.
   if (result === undefined) {
     outputChannel?.appendLine(
-      `[Settings] User dismissed gitignore prompt for ${target}`
+      `[Settings] User dismissed gitignore prompt for ${target} — defaulting to allow commit`,
     );
-    return undefined;
+    await setGitignorePreference(workspaceRoot, target, false);
+    return false;
   }
-  
+
   const addToGitignore = result === 'Keep Local (add to .gitignore)';
-  
+
   // Persist the decision
   await setGitignorePreference(workspaceRoot, target, addToGitignore);
-  
+
   outputChannel?.appendLine(
-    `[Settings] User chose to ${addToGitignore ? 'add' : 'not add'} ${target} to .gitignore`
+    `[Settings] User chose to ${addToGitignore ? 'add' : 'not add'} ${target} to .gitignore`,
   );
-  
+
   return addToGitignore;
 }
 
@@ -468,88 +480,8 @@ export async function promptGitignorePreference(
  */
 export async function hasGitignorePreference(
   workspaceRoot: vscode.Uri,
-  target: GitignoreTarget
+  target: GitignoreTarget,
 ): Promise<boolean> {
   const pref = await getGitignorePreference(workspaceRoot, target);
   return pref !== undefined;
-}
-
-// ============================================================================
-// Directory Exclusion Settings
-// ============================================================================
-
-/**
- * Get directory exclusion settings.
- * Returns undefined fields if not configured (use defaults).
- */
-export async function getExclusionSettings(
-  workspaceRoot: vscode.Uri
-): Promise<ExclusionSettings | undefined> {
-  const settings = await readAspectSettings(workspaceRoot);
-  return settings.excludeDirectories;
-}
-
-/**
- * Update directory exclusion settings (merges with existing).
- */
-export async function updateExclusionSettings(
-  workspaceRoot: vscode.Uri,
-  exclusionSettings: Partial<ExclusionSettings>
-): Promise<void> {
-  const current = await readAspectSettings(workspaceRoot);
-  await updateAspectSettings(workspaceRoot, {
-    excludeDirectories: {
-      ...current.excludeDirectories,
-      ...exclusionSettings
-    }
-  });
-}
-
-/**
- * Add a directory to the "always exclude" list.
- */
-export async function addAlwaysExcludeDir(
-  workspaceRoot: vscode.Uri,
-  dir: string
-): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const always = current?.always ?? [];
-  const normalized = dir.replace(/\\/g, '/');
-  if (!always.includes(normalized)) {
-    await updateExclusionSettings(workspaceRoot, {
-      always: [...always, normalized]
-    });
-  }
-}
-
-/**
- * Add a directory to the "never exclude" list (override auto-detection).
- */
-export async function addNeverExcludeDir(
-  workspaceRoot: vscode.Uri,
-  dir: string
-): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const never = current?.never ?? [];
-  const normalized = dir.replace(/\\/g, '/');
-  if (!never.includes(normalized)) {
-    await updateExclusionSettings(workspaceRoot, {
-      never: [...never, normalized]
-    });
-  }
-}
-
-/**
- * Remove a directory from exclusion lists.
- */
-export async function removeExclusionOverride(
-  workspaceRoot: vscode.Uri,
-  dir: string
-): Promise<void> {
-  const current = await getExclusionSettings(workspaceRoot);
-  const normalized = dir.replace(/\\/g, '/');
-  await updateExclusionSettings(workspaceRoot, {
-    always: (current?.always ?? []).filter(d => d !== normalized),
-    never: (current?.never ?? []).filter(d => d !== normalized)
-  });
 }

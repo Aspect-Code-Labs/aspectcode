@@ -1,0 +1,30 @@
+{
+  "$schema": "./test-repos.schema.json",
+  "description": "Repos cloned and tested by test-cli-repos.ps1. Keep this list small — each repo is cloned, fully tested, and deleted.",
+  "repos": [
+    {
+      "url": "https://github.com/expressjs/express.git",
+      "name": "express",
+      "description": "Popular Node.js framework — JS, large dependency graph",
+      "shallow": true,
+      "minFiles": 20,
+      "minEdges": 0
+    },
+    {
+      "url": "https://github.com/pallets/flask.git",
+      "name": "flask",
+      "description": "Python micro-framework — validates cross-language support",
+      "shallow": true,
+      "minFiles": 20,
+      "minEdges": 10
+    },
+    {
+      "url": "https://github.com/davidfowl/TodoApi.git",
+      "name": "TodoApi",
+      "description": "Minimal .NET API — C# parser coverage",
+      "shallow": true,
+      "minFiles": 10,
+      "minEdges": 1
+    }
+  ]
+}

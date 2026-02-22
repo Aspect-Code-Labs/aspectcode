@@ -1,6 +1,6 @@
 /**
  * Tests for KB (Knowledge Base) generation.
- * 
+ *
  * These tests verify invariants for the generated KB files:
  * - architecture.md: Guardrails and high-risk zones
  * - map.md: Symbol index with signatures
@@ -10,6 +10,8 @@
 // Mocha globals for VS Code test runner
 declare function suite(name: string, fn: () => void): void;
 declare function test(name: string, fn: () => void): void;
+
+import { buildRelativeFileContentMap } from '../assistants/kbShared';
 
 // ============================================================================
 // KB Content Invariants
@@ -37,7 +39,7 @@ export interface KBInvariants {
 export const KB_SIZE_LIMITS = {
   architecture: 200,
   map: 300,
-  context: 200
+  context: 200,
 } as const;
 
 // ============================================================================
@@ -62,10 +64,13 @@ export function validatePathsUseForwardSlashes(content: string): boolean {
 /**
  * Check for duplicate entries in list items
  */
-export function validateNoDuplicateEntries(content: string): { valid: boolean; duplicates: string[] } {
+export function validateNoDuplicateEntries(content: string): {
+  valid: boolean;
+  duplicates: string[];
+} {
   const listItems: string[] = [];
   const duplicates: string[] = [];
-  
+
   // Extract list items (lines starting with -)
   const lines = content.split('\n');
   for (const line of lines) {
@@ -83,14 +88,17 @@ export function validateNoDuplicateEntries(content: string): { valid: boolean; d
       }
     }
   }
-  
+
   return { valid: duplicates.length === 0, duplicates };
 }
 
 /**
  * Check if content is within line budget
  */
-export function validateWithinLineBudget(content: string, maxLines: number): { valid: boolean; actualLines: number } {
+export function validateWithinLineBudget(
+  content: string,
+  maxLines: number,
+): { valid: boolean; actualLines: number } {
   const lineCount = content.split('\n').length;
   return { valid: lineCount <= maxLines, actualLines: lineCount };
 }
@@ -98,56 +106,54 @@ export function validateWithinLineBudget(content: string, maxLines: number): { v
 /**
  * Check for required sections in architecture.md
  */
-export function validateArchitectureSections(content: string): { valid: boolean; missingSections: string[] } {
-  const requiredSections = [
-    '# Architecture',
-    '## Entry Points',
-  ];
-  
+export function validateArchitectureSections(content: string): {
+  valid: boolean;
+  missingSections: string[];
+} {
+  const requiredSections = ['# Architecture', '## Entry Points'];
+
   const optionalSections = [
     '## ⚠️ High-Risk Architectural Hubs',
     '## Directory Layout',
     '## ⚠️ Circular Dependencies',
   ];
-  
-  const missingSections = requiredSections.filter(section => !content.includes(section));
+
+  const missingSections = requiredSections.filter((section) => !content.includes(section));
   return { valid: missingSections.length === 0, missingSections };
 }
 
 /**
  * Check for required sections in map.md
  */
-export function validateMapSections(content: string): { valid: boolean; missingSections: string[] } {
-  const requiredSections = [
-    '# Map',
-  ];
-  
-  const optionalSections = [
-    '## Data Models',
-    '## Symbol Index',
-    '## Conventions',
-  ];
-  
-  const missingSections = requiredSections.filter(section => !content.includes(section));
+export function validateMapSections(content: string): {
+  valid: boolean;
+  missingSections: string[];
+} {
+  const requiredSections = ['# Map'];
+
+  const optionalSections = ['## Data Models', '## Symbol Index', '## Conventions'];
+
+  const missingSections = requiredSections.filter((section) => !content.includes(section));
   return { valid: missingSections.length === 0, missingSections };
 }
 
 /**
  * Check for required sections in context.md
  */
-export function validateContextSections(content: string): { valid: boolean; missingSections: string[] } {
-  const requiredSections = [
-    '# Context',
-  ];
-  
+export function validateContextSections(content: string): {
+  valid: boolean;
+  missingSections: string[];
+} {
+  const requiredSections = ['# Context'];
+
   const optionalSections = [
     '## Module Clusters',
     '## Critical Flows',
     '## Dependency Chains',
     '## Quick Reference',
   ];
-  
-  const missingSections = requiredSections.filter(section => !content.includes(section));
+
+  const missingSections = requiredSections.filter((section) => !content.includes(section));
   return { valid: missingSections.length === 0, missingSections };
 }
 
@@ -163,26 +169,26 @@ export function validateTimestamp(content: string): boolean {
  * Run all invariant checks on a KB file
  */
 export function validateKBFile(
-  content: string, 
-  fileType: 'architecture' | 'map' | 'context'
+  content: string,
+  fileType: 'architecture' | 'map' | 'context',
 ): KBInvariants & { errors: string[] } {
   const errors: string[] = [];
-  
+
   const pathsValid = validatePathsUseForwardSlashes(content);
   if (!pathsValid) {
     errors.push('Found paths with backslashes - should use forward slashes');
   }
-  
+
   const dupeCheck = validateNoDuplicateEntries(content);
   if (!dupeCheck.valid) {
     errors.push(`Found duplicate entries: ${dupeCheck.duplicates.join(', ')}`);
   }
-  
+
   const budgetCheck = validateWithinLineBudget(content, KB_SIZE_LIMITS[fileType]);
   if (!budgetCheck.valid) {
     errors.push(`Exceeds line budget: ${budgetCheck.actualLines} > ${KB_SIZE_LIMITS[fileType]}`);
   }
-  
+
   let sectionsCheck: { valid: boolean; missingSections: string[] };
   switch (fileType) {
     case 'architecture':
@@ -198,19 +204,19 @@ export function validateKBFile(
   if (!sectionsCheck.valid) {
     errors.push(`Missing required sections: ${sectionsCheck.missingSections.join(', ')}`);
   }
-  
+
   const timestampValid = validateTimestamp(content);
   if (!timestampValid) {
     errors.push('Missing or invalid timestamp');
   }
-  
+
   return {
     pathsUseForwardSlashes: pathsValid,
     noDuplicateEntries: dupeCheck.valid,
     withinLineBudget: budgetCheck.valid,
     hasRequiredSections: sectionsCheck.valid,
     hasValidTimestamp: timestampValid,
-    errors
+    errors,
   };
 }
 
@@ -219,11 +225,10 @@ export function validateKBFile(
 // ============================================================================
 
 suite('KB Generation Invariants', () => {
-  
   test('validatePathsUseForwardSlashes detects backslashes', () => {
     const contentWithBackslash = '- `src\\utils\\helper.ts`\n- `app/main.py`';
     const contentWithForwardSlash = '- `src/utils/helper.ts`\n- `app/main.py`';
-    
+
     if (validatePathsUseForwardSlashes(contentWithBackslash)) {
       throw new Error('Should detect backslash paths as invalid');
     }
@@ -231,11 +236,11 @@ suite('KB Generation Invariants', () => {
       throw new Error('Should accept forward slash paths as valid');
     }
   });
-  
+
   test('validateNoDuplicateEntries detects duplicates', () => {
     const contentWithDupes = '- `src/main.ts`\n- `src/utils.ts`\n- `src/main.ts`';
     const contentNoDupes = '- `src/main.ts`\n- `src/utils.ts`\n- `src/app.ts`';
-    
+
     const dupeResult = validateNoDuplicateEntries(contentWithDupes);
     if (dupeResult.valid) {
       throw new Error('Should detect duplicate entries');
@@ -243,22 +248,22 @@ suite('KB Generation Invariants', () => {
     if (!dupeResult.duplicates.includes('src/main.ts')) {
       throw new Error('Should identify the duplicate path');
     }
-    
+
     const noDupeResult = validateNoDuplicateEntries(contentNoDupes);
     if (!noDupeResult.valid) {
       throw new Error('Should accept unique entries as valid');
     }
   });
-  
+
   test('validateWithinLineBudget checks line count', () => {
     const shortContent = 'Line 1\nLine 2\nLine 3';
     const longContent = Array(250).fill('Line').join('\n');
-    
+
     const shortResult = validateWithinLineBudget(shortContent, 200);
     if (!shortResult.valid) {
       throw new Error('Short content should be within budget');
     }
-    
+
     const longResult = validateWithinLineBudget(longContent, 200);
     if (longResult.valid) {
       throw new Error('Long content should exceed budget');
@@ -267,11 +272,11 @@ suite('KB Generation Invariants', () => {
       throw new Error(`Expected 250 lines, got ${longResult.actualLines}`);
     }
   });
-  
+
   test('validateTimestamp checks ISO format', () => {
     const validContent = 'Some content\n\n_Generated: 2024-01-15T10:30:45.123Z_\n';
     const invalidContent = 'Some content\n\nGenerated: Jan 15 2024\n';
-    
+
     if (!validateTimestamp(validContent)) {
       throw new Error('Should accept valid ISO timestamp');
     }
@@ -279,22 +284,61 @@ suite('KB Generation Invariants', () => {
       throw new Error('Should reject non-ISO timestamp');
     }
   });
-  
+
   test('validateArchitectureSections checks required sections', () => {
     const validContent = '# Architecture\n\nSome intro.\n\n## Entry Points\n\nEntry point list.';
     const invalidContent = '# Architecture\n\nSome intro.\n\n## Directory Layout\n\nDirs.';
-    
+
     const validResult = validateArchitectureSections(validContent);
     if (!validResult.valid) {
-      throw new Error(`Should accept valid architecture: missing ${validResult.missingSections.join(', ')}`);
+      throw new Error(
+        `Should accept valid architecture: missing ${validResult.missingSections.join(', ')}`,
+      );
     }
-    
+
     const invalidResult = validateArchitectureSections(invalidContent);
     if (invalidResult.valid) {
       throw new Error('Should detect missing Entry Points section');
     }
   });
-  
+});
+
+suite('KB Shared Analysis Preparation', () => {
+  test('buildRelativeFileContentMap converts absolute paths to workspace-relative posix keys', () => {
+    const workspaceRoot = 'C:\\repo';
+    const files = ['C:\\repo\\src\\main.ts', 'C:\\repo\\lib\\util.ts'];
+    const cache = new Map<string, string>([
+      ['C:\\repo\\src\\main.ts', 'export const main = 1;'],
+      ['C:\\repo\\lib\\util.ts', 'export const util = 2;'],
+    ]);
+
+    const result = buildRelativeFileContentMap(files, workspaceRoot, cache);
+
+    if (!result.has('src/main.ts')) {
+      throw new Error('Expected src/main.ts key in relative map');
+    }
+    if (!result.has('lib/util.ts')) {
+      throw new Error('Expected lib/util.ts key in relative map');
+    }
+    if (Array.from(result.keys()).some((k) => k.includes('\\'))) {
+      throw new Error('Expected all keys to use forward slashes');
+    }
+  });
+
+  test('buildRelativeFileContentMap skips files missing from cache', () => {
+    const workspaceRoot = '/repo';
+    const files = ['/repo/src/a.ts', '/repo/src/b.ts'];
+    const cache = new Map<string, string>([['/repo/src/a.ts', 'export const a = 1;']]);
+
+    const result = buildRelativeFileContentMap(files, workspaceRoot, cache);
+
+    if (!result.has('src/a.ts')) {
+      throw new Error('Expected src/a.ts to be included');
+    }
+    if (result.has('src/b.ts')) {
+      throw new Error('Expected src/b.ts to be excluded when content is missing');
+    }
+  });
 });
 
 // ============================================================================
@@ -455,38 +499,38 @@ _Generated: 2024-01-15T10:30:45.123Z_
  */
 export function validateUsedInAreFilePaths(content: string): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  
+
   // Find all "Used In (files)" column values in tables
   const tableRows = content.match(/\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|$/gm) || [];
-  
+
   for (const row of tableRows) {
     // Skip header and separator rows
     if (row.includes('Symbol') || row.includes('---')) continue;
-    
+
     // Get the last column (Used In)
-    const columns = row.split('|').filter(c => c.trim());
+    const columns = row.split('|').filter((c) => c.trim());
     if (columns.length < 4) continue;
-    
+
     const usedInCell = columns[3].trim();
     if (usedInCell === '—' || usedInCell === '') continue;
-    
+
     // Check each file reference in the cell
-    const fileRefs = usedInCell.split(',').map(f => f.trim().replace(/`/g, ''));
+    const fileRefs = usedInCell.split(',').map((f) => f.trim().replace(/`/g, ''));
     for (const ref of fileRefs) {
       // Skip the (+N more) indicator
       if (ref.match(/^\(\+\d+ more\)$/)) continue;
-      
+
       // File paths should have extensions or be relative paths
       const hasExtension = /\.\w{1,4}$/.test(ref);
       const isPath = ref.includes('/');
-      
+
       if (!hasExtension && !isPath && ref.length > 0) {
         // Bare identifier without extension - likely wrong
         issues.push(`Bare identifier in Used In: "${ref}" - should be a file path`);
       }
     }
   }
-  
+
   return { valid: issues.length === 0, issues };
 }
 
@@ -497,36 +541,39 @@ export function validateUsedInAreFilePaths(content: string): { valid: boolean; i
  */
 export function validateHubMetrics(content: string): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  
+
   // Find hub details sections
-  const hubDetailsPattern = /\*\*\d+\.\s+`([^`]+)`\*\*\s+—\s+Blast radius:\s+(\d+)\s+files\n\s+- Direct dependents:\s+(\d+)\n\s+- Indirect dependents:\s+~(\d+)/g;
-  
+  const hubDetailsPattern =
+    /\*\*\d+\.\s+`([^`]+)`\*\*\s+—\s+Blast radius:\s+(\d+)\s+files\n\s+- Direct dependents:\s+(\d+)\n\s+- Indirect dependents:\s+~(\d+)/g;
+
   let match;
   while ((match = hubDetailsPattern.exec(content)) !== null) {
     const [, filePath, blastRadius, directCount, indirectCount] = match;
     const expectedBlast = parseInt(directCount) + parseInt(indirectCount);
     const actualBlast = parseInt(blastRadius);
-    
+
     if (expectedBlast !== actualBlast) {
-      issues.push(`Hub ${filePath}: Blast radius ${actualBlast} != direct(${directCount}) + indirect(${indirectCount}) = ${expectedBlast}`);
+      issues.push(
+        `Hub ${filePath}: Blast radius ${actualBlast} != direct(${directCount}) + indirect(${indirectCount}) = ${expectedBlast}`,
+      );
     }
   }
-  
+
   // Check "Imported by (N files)" matches actual list
   const importedByPattern = /Imported by \((\d+) files\):\n((?:\s+- `[^`]+`\n)+)/g;
-  
+
   while ((match = importedByPattern.exec(content)) !== null) {
     const [, countStr, listBlock] = match;
     const declaredCount = parseInt(countStr);
     const listItems = (listBlock.match(/- `[^`]+`/g) || []).length;
     const hasMore = listBlock.includes('...and');
-    
+
     // If there's a "...and X more", the list should be truncated
     if (!hasMore && listItems !== declaredCount && listItems > 0) {
       issues.push(`Imported by count (${declaredCount}) doesn't match list length (${listItems})`);
     }
   }
-  
+
   return { valid: issues.length === 0, issues };
 }
 
@@ -535,36 +582,40 @@ export function validateHubMetrics(content: string): { valid: boolean; issues: s
  */
 export function validateEntryPointStructure(content: string): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  
+
   // Check that Entry Points section exists and has proper subsections
   if (!content.includes('## Entry Points')) {
     issues.push('Missing "## Entry Points" section');
     return { valid: false, issues };
   }
-  
+
   // Check for confidence indicators
   const entryPointSection = content.split('## Entry Points')[1]?.split('##')[0] || '';
-  const hasConfidenceIcons = entryPointSection.includes('🟢') || 
-                              entryPointSection.includes('🟡') || 
-                              entryPointSection.includes('🟠');
-  
+  const hasConfidenceIcons =
+    entryPointSection.includes('🟢') ||
+    entryPointSection.includes('🟡') ||
+    entryPointSection.includes('🟠');
+
   if (!hasConfidenceIcons && entryPointSection.includes('-')) {
     issues.push('Entry points should have confidence indicators (🟢/🟡/🟠)');
   }
-  
+
   return { valid: issues.length === 0, issues };
 }
 
 /**
  * Validate cluster names are unique (no duplicates without disambiguation).
  */
-export function validateClusterNamesUnique(content: string): { valid: boolean; duplicates: string[] } {
+export function validateClusterNamesUnique(content: string): {
+  valid: boolean;
+  duplicates: string[];
+} {
   const duplicates: string[] = [];
-  
+
   // Find all cluster headers in context.md
   const clusterHeaders = content.match(/^###\s+([^\n]+)$/gm) || [];
-  const clusterNames = clusterHeaders.map(h => h.replace('### ', '').trim());
-  
+  const clusterNames = clusterHeaders.map((h) => h.replace('### ', '').trim());
+
   const seen = new Set<string>();
   for (const name of clusterNames) {
     if (seen.has(name)) {
@@ -572,7 +623,7 @@ export function validateClusterNamesUnique(content: string): { valid: boolean; d
     }
     seen.add(name);
   }
-  
+
   return { valid: duplicates.length === 0, duplicates };
 }
 
@@ -581,7 +632,6 @@ export function validateClusterNamesUnique(content: string): { valid: boolean; d
 // ============================================================================
 
 suite('KB Generation Extended Invariants', () => {
-  
   test('validateUsedInAreFilePaths detects bare identifiers', () => {
     const badContent = `
 | Symbol | Kind | Signature | Used In (files) |
@@ -593,18 +643,18 @@ suite('KB Generation Extended Invariants', () => {
 |--------|------|-----------|-----------------|
 | \`foo\` | function | \`fn foo()\` | \`services/auth.ts\`, \`main.ts\` |
 `;
-    
+
     const badResult = validateUsedInAreFilePaths(badContent);
     if (badResult.valid) {
       throw new Error('Should detect bare identifiers as invalid');
     }
-    
+
     const goodResult = validateUsedInAreFilePaths(goodContent);
     if (!goodResult.valid) {
       throw new Error(`Should accept file paths: ${goodResult.issues.join(', ')}`);
     }
   });
-  
+
   test('validateHubMetrics checks blast radius math', () => {
     const validContent = `
 **1. \`src/core.ts\`** — Blast radius: 15 files
@@ -616,18 +666,18 @@ suite('KB Generation Extended Invariants', () => {
    - Direct dependents: 10
    - Indirect dependents: ~5
 `;
-    
+
     const validResult = validateHubMetrics(validContent);
     if (!validResult.valid) {
       throw new Error(`Should accept correct blast radius: ${validResult.issues.join(', ')}`);
     }
-    
+
     const invalidResult = validateHubMetrics(invalidContent);
     if (invalidResult.valid) {
       throw new Error('Should detect incorrect blast radius math');
     }
   });
-  
+
   test('validateClusterNamesUnique detects duplicate cluster names', () => {
     const duplicateContent = `
 ### Auth
@@ -649,16 +699,15 @@ More files
 ### Core
 Other files
 `;
-    
+
     const dupeResult = validateClusterNamesUnique(duplicateContent);
     if (dupeResult.valid) {
       throw new Error('Should detect duplicate cluster names');
     }
-    
+
     const uniqueResult = validateClusterNamesUnique(uniqueContent);
     if (!uniqueResult.valid) {
       throw new Error(`Should accept unique names: ${uniqueResult.duplicates.join(', ')}`);
     }
   });
-  
 });

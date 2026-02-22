@@ -24,6 +24,30 @@
         "clear": false
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Aspect Code: Test CLI (sandbox)",
+      "type": "shell",
+      "command": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-sandbox.ps1 -SkipBuild",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Aspect Code: Test CLI (multi-repo)",
+      "type": "shell",
+      "command": "powershell -ExecutionPolicy Bypass -File ./scripts/test-cli-repos.ps1 -SkipBuild",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
     }
   ]
 }
