@@ -73,12 +73,6 @@
       "type": "object",
       "title": "Aspect Code",
       "properties": {
-        "aspectcode.autoRegenerateKb": {
-          "type": "string",
-          "enum": ["manual", "onChange", "idle"],
-          "default": "onChange",
-          "description": "Auto-regeneration mode for KB files. When aspectcode.json exists in the project root its 'updateRate' field takes precedence; this VS Code setting is used as the fallback."
-        },
         "aspectcode.suppressSetupPrompt": {
           "type": "boolean",
           "default": false,

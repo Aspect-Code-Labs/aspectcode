@@ -258,13 +258,20 @@ async function readVSCodeWorkspaceSettingsJson(
 }
 
 /**
- * One-time-ish migration: copy selected aspectcode.* settings from .vscode/settings.json
- * into aspectcode.json.
+ * One-shot migration: copy selected aspectcode.* settings from .vscode/settings.json
+ * into aspectcode.json. Runs at most once per workspace (guarded by globalState flag).
  */
 export async function migrateAspectSettingsFromVSCode(
   workspaceRoot: vscode.Uri,
   outputChannel?: vscode.OutputChannel,
+  globalState?: vscode.Memento,
 ): Promise<boolean> {
+  // Guard: skip if migration already completed for this workspace
+  const MIGRATION_DONE_KEY = 'aspectcode.migrationDone';
+  if (globalState?.get<boolean>(MIGRATION_DONE_KEY, false)) {
+    return false;
+  }
+
   const vsSettings = await readVSCodeWorkspaceSettingsJson(workspaceRoot);
   if (!vsSettings) return false;
 
@@ -314,9 +321,14 @@ export async function migrateAspectSettingsFromVSCode(
     update.assistants = assistantUpdate;
   }
 
-  if (!changed) return false;
+  if (!changed) {
+    // No settings to migrate — mark complete so we never re-check
+    await globalState?.update(MIGRATION_DONE_KEY, true);
+    return false;
+  }
 
   await updateAspectSettings(workspaceRoot, update);
+  await globalState?.update(MIGRATION_DONE_KEY, true);
   outputChannel?.appendLine(
     '[Settings] Migrated Aspect Code settings from .vscode/settings.json to aspectcode.json',
   );
@@ -325,24 +337,33 @@ export async function migrateAspectSettingsFromVSCode(
 
 export async function getInstructionsModeSetting(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel,
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<InstructionsMode> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
-  return 'safe';
+  // Auto-detect .aspect/instructions.md → custom mode
+  try {
+    const customPath = vscode.Uri.joinPath(workspaceRoot, '.aspect', 'instructions.md');
+    await vscode.workspace.fs.stat(customPath);
+    return 'custom';
+  } catch {
+    // File doesn't exist — fall through
+  }
+
+  // Read persisted value from aspectcode.json (default: 'safe')
+  const settings = await readAspectSettings(workspaceRoot);
+  return settings.instructionsMode ?? 'safe';
 }
 
 export async function setInstructionsModeSetting(
   workspaceRoot: vscode.Uri,
-  _mode: InstructionsMode,
+  mode: InstructionsMode,
 ): Promise<void> {
-  await updateAspectSettings(workspaceRoot, { instructionsMode: 'safe' });
+  await updateAspectSettings(workspaceRoot, { instructionsMode: mode });
 }
 
 export async function getAutoRegenerateKbSetting(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel,
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<AutoRegenerateKbMode> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
   const settings = await readAspectSettings(workspaceRoot);
   return (
     settings.updateRate ?? normalizeAutoRegenerateKbMode(settings.autoRegenerateKb) ?? 'onChange'
@@ -374,9 +395,8 @@ export async function setExtensionEnabledSetting(
 
 export async function getAssistantsSettings(
   workspaceRoot: vscode.Uri,
-  outputChannel?: vscode.OutputChannel,
+  _outputChannel?: vscode.OutputChannel,
 ): Promise<Required<AssistantsSettings>> {
-  await migrateAspectSettingsFromVSCode(workspaceRoot, outputChannel);
   const settings = await readAspectSettings(workspaceRoot);
   const a = settings.assistants ?? {};
   return {
@@ -453,10 +473,12 @@ export async function promptGitignorePreference(
     "Allow Commit (don't add)",
   );
 
-  // If user dismissed without choosing, don't persist and return undefined
+  // If user dismissed without choosing, default to Allow Commit (false) so we
+  // stop re-prompting. This matches the "default to NOT gitignoring" policy.
   if (result === undefined) {
-    outputChannel?.appendLine(`[Settings] User dismissed gitignore prompt for ${target}`);
-    return undefined;
+    outputChannel?.appendLine(`[Settings] User dismissed gitignore prompt for ${target} — defaulting to allow commit`);
+    await setGitignorePreference(workspaceRoot, target, false);
+    return false;
   }
 
   const addToGitignore = result === 'Keep Local (add to .gitignore)';

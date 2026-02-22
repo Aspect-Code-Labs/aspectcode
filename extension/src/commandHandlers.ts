@@ -16,10 +16,10 @@ import { createVsCodeEmitterHost } from './services/vscodeEmitterHost';
 import {
   getAssistantsSettings,
   getInstructionsModeSetting,
-  setInstructionsModeSetting,
   updateAspectSettings,
   getExtensionEnabledSetting,
   setExtensionEnabledSetting,
+  setAutoRegenerateKbSetting,
 } from './services/aspectSettings';
 import { cancelAndResetAllInFlightWork } from './services/enablementCancellation';
 import { cliGenerateWithInstructions } from './services/CliAdapter';
@@ -166,15 +166,16 @@ export function activateCommands(
     void onStatusBarUpdate?.();
   });
   aspectWatcher.onDidChange(async (uri) => {
-    // Ensure instructions.mode stays 'safe' (the only supported mode)
+    // When .aspect/instructions.md changes, regenerate instruction files
+    // so the custom content flows through to assistant configs.
     if (uri.fsPath.endsWith('instructions.md')) {
       const workspaceRoot = getWorkspaceRoot();
       if (workspaceRoot) {
         try {
           const mode = await getInstructionsModeSetting(workspaceRoot, channel);
-          if (mode !== 'safe') {
-            await setInstructionsModeSetting(workspaceRoot, 'safe');
-            channel.appendLine('[Instructions] Auto-corrected instructions.mode to safe');
+          if (mode === 'custom') {
+            channel.appendLine('[Instructions] Custom instructions.md changed — regenerating instruction files');
+            await emitInstructionFilesOnlyViaEmitters(workspaceRoot, channel);
           }
         } catch {
           /* ignore */
@@ -471,7 +472,39 @@ async function handleGenerate(
       outputChannel.appendLine(`[KB] Failed to mark KB fresh (non-critical): ${e}`);
     }
 
-    vscode.window.showInformationMessage('Aspect Code updated.');
+    // After first-ever generation, show update-rate prompt instead of the
+    // generic success toast so VS Code doesn't stack two competing notifications.
+    // workspaceState so each repo gets the prompt once (not global forever).
+    const UPDATE_RATE_PROMPTED_KEY = 'aspectcode.updateRatePrompted';
+    const isFirstGeneration =
+      context != null && !context.workspaceState.get<boolean>(UPDATE_RATE_PROMPTED_KEY, false);
+
+    if (isFirstGeneration) {
+      await context.workspaceState.update(UPDATE_RATE_PROMPTED_KEY, true);
+      outputChannel.appendLine('[Settings] First generation — showing update-rate prompt');
+
+      const choice = await vscode.window.showInformationMessage(
+        'Aspect Code generated! How should it stay up to date?',
+        { modal: false },
+        'On Change (recommended)',
+        'On Idle',
+        'Manual Only',
+      );
+
+      if (choice) {
+        const modeMap: Record<string, 'onChange' | 'idle' | 'manual'> = {
+          'On Change (recommended)': 'onChange',
+          'On Idle': 'idle',
+          'Manual Only': 'manual',
+        };
+        const mode = modeMap[choice] ?? 'onChange';
+        await setAutoRegenerateKbSetting(workspaceRoot, mode);
+        outputChannel.appendLine(`[Settings] User chose update rate: ${mode}`);
+      }
+    } else {
+      vscode.window.showInformationMessage('Aspect Code updated.');
+    }
+
     void onStatusBarUpdate?.();
 
     if (perfEnabled) {

@@ -206,12 +206,14 @@ export async function activate(context: vscode.ExtensionContext) {
     if (root) {
       const rootUri = vscode.Uri.file(root);
 
-      await migrateAspectSettingsFromVSCode(rootUri, outputChannel);
+      await migrateAspectSettingsFromVSCode(rootUri, outputChannel, context.globalState);
 
-      // Ensure a default updateRate is present in aspectcode.json.
+      // Ensure a default updateRate is present — but only if aspectcode.json
+      // already exists.  Creating it here would suppress the first-open
+      // setup prompt that checks for its absence.
       const settings = await readAspectSettings(rootUri);
       if (settings.updateRate === undefined && settings.autoRegenerateKb === undefined) {
-        await setAutoRegenerateKbSetting(rootUri, 'onChange');
+        await setAutoRegenerateKbSetting(rootUri, 'onChange', { createIfMissing: false });
       }
     }
   } catch (e) {
