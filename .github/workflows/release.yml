@@ -37,6 +37,7 @@ jobs:
         run: npm run build --workspace=packages/cli
 
       - name: Create Release Pull Request or Publish
+        id: changesets
         uses: changesets/action@v1
         with:
           version: npm run changeset:version
@@ -47,3 +48,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build VSIX
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          npm run build --workspace=extension
+          cd extension && npx @vscode/vsce package --no-dependencies
+
+      - name: Attach VSIX to GitHub Release
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          CLI_VERSION=$(echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | select(.name == "aspectcode") | .version')
+          if [ -n "$CLI_VERSION" ]; then
+            gh release upload "aspectcode@${CLI_VERSION}" extension/*.vsix --clobber
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
