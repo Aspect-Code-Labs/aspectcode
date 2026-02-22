@@ -183,7 +183,9 @@ export function activateCommands(
         try {
           const mode = await getInstructionsModeSetting(workspaceRoot, channel);
           if (mode === 'custom') {
-            channel.appendLine('[Instructions] Custom instructions.md changed — regenerating instruction files');
+            channel.appendLine(
+              '[Instructions] Custom instructions.md changed — regenerating instruction files',
+            );
             await emitInstructionFilesOnlyViaEmitters(workspaceRoot, channel);
           }
         } catch {
@@ -486,7 +488,7 @@ async function handleGenerate(
     // workspaceState so each repo gets the prompt once (not global forever).
     const UPDATE_RATE_PROMPTED_KEY = 'aspectcode.updateRatePrompted';
     const isFirstGeneration =
-      context != null && !context.workspaceState.get<boolean>(UPDATE_RATE_PROMPTED_KEY, false);
+      context !== null && !context.workspaceState.get<boolean>(UPDATE_RATE_PROMPTED_KEY, false);
 
     if (isFirstGeneration) {
       await context.workspaceState.update(UPDATE_RATE_PROMPTED_KEY, true);

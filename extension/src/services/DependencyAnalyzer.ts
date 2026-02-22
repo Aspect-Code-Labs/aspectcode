@@ -14,13 +14,13 @@ import {
   createNodeHost,
 } from '@aspectcode/core';
 
-//  Re-exports (backward compat) 
+//  Re-exports (backward compat)
 
 export type { DependencyLink } from '@aspectcode/core';
 export type { ImportStatement, CallSite } from '@aspectcode/core';
 export type DependencyProgressCallback = CoreProgressCallback;
 
-//  vscode-backed CoreHost 
+//  vscode-backed CoreHost
 
 function createVscodeHost(): CoreHost {
   const base = createNodeHost('');
@@ -34,7 +34,7 @@ function createVscodeHost(): CoreHost {
   };
 }
 
-//  Wrapped class 
+//  Wrapped class
 
 export class DependencyAnalyzer {
   private inner = new CoreAnalyzer();
@@ -47,10 +47,6 @@ export class DependencyAnalyzer {
     files: string[],
     onProgress?: DependencyProgressCallback,
   ): Promise<DependencyLink[]> {
-    return this.inner.analyzeDependencies(
-      files,
-      createVscodeHost(),
-      onProgress,
-    );
+    return this.inner.analyzeDependencies(files, createVscodeHost(), onProgress);
   }
 }

@@ -228,13 +228,15 @@ async function generateKnowledgeBaseInProcess(
   const rootFsPath = workspaceRoot.fsPath;
   const tAnalyze = Date.now();
   const relativeFileContents = buildRelativeFileContentMap(files, rootFsPath, fileContentCache);
-  const sharedAnalyze = (aspectCore as {
-    analyzeRepoWithDependencies?: (
-      rootDir: string,
-      relativeFiles: Map<string, string>,
-      absoluteFiles: Map<string, string>,
-    ) => Promise<AnalysisModel>;
-  }).analyzeRepoWithDependencies;
+  const sharedAnalyze = (
+    aspectCore as {
+      analyzeRepoWithDependencies?: (
+        rootDir: string,
+        relativeFiles: Map<string, string>,
+        absoluteFiles: Map<string, string>,
+      ) => Promise<AnalysisModel>;
+    }
+  ).analyzeRepoWithDependencies;
   if (typeof sharedAnalyze !== 'function') {
     throw new Error('Installed @aspectcode/core does not expose analyzeRepoWithDependencies');
   }

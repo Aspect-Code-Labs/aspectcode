@@ -60,13 +60,13 @@ interface AspectSettings {
   assistants?: AssistantsSettings;
 
   /**
-  * Update trigger mode.
+   * Update trigger mode.
    */
   updateRate?: UpdateRateMode;
 
   /**
-  * Legacy key (kept for backward compatibility with older configs).
-  */
+   * Legacy key (kept for backward compatibility with older configs).
+   */
   autoRegenerateKb?: 'off' | 'onSave' | 'idle';
 
   /**
@@ -456,7 +456,9 @@ export async function promptGitignorePreference(
   // If user dismissed without choosing, default to Allow Commit (false) so we
   // stop re-prompting. This matches the "default to NOT gitignoring" policy.
   if (result === undefined) {
-    outputChannel?.appendLine(`[Settings] User dismissed gitignore prompt for ${target} — defaulting to allow commit`);
+    outputChannel?.appendLine(
+      `[Settings] User dismissed gitignore prompt for ${target} — defaulting to allow commit`,
+    );
     await setGitignorePreference(workspaceRoot, target, false);
     return false;
   }

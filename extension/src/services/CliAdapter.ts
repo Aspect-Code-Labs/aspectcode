@@ -74,7 +74,6 @@ function resolveCliBin(workspaceRoot: string): { node: string; script: string } 
   const localScript = path.join(workspaceRoot, 'packages', 'cli', 'bin', 'aspectcode.js');
   try {
     // Check synchronously — this is called infrequently (once per command).
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('fs').accessSync(localScript);
     return { node: process.execPath, script: localScript };
   } catch {

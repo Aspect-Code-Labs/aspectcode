@@ -380,5 +380,3 @@ function getTargetInfo(target: GitignoreTarget): IgnoreTarget {
 function getExplicitCandidates(pattern: string): string[] {
   return [pattern, `/${pattern}`];
 }
-
-

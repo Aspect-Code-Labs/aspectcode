@@ -1,10 +1,6 @@
 ﻿import * as vscode from 'vscode';
 import * as path from 'path';
-import {
-  loadGrammars,
-  createNodeHost,
-  createEmptyGrammarSummary,
-} from '@aspectcode/core';
+import { loadGrammars, createNodeHost, createEmptyGrammarSummary } from '@aspectcode/core';
 import type { LoadedGrammars, GrammarSummary } from '@aspectcode/core';
 
 export type { LoadedGrammars };
@@ -40,13 +36,9 @@ export async function loadGrammarsOnce(
   };
 
   // Override treeSitter path to use extension-resolved absolute path
-  host.wasmPaths.treeSitter = context.asAbsolutePath(
-    path.join('parsers', 'tree-sitter.wasm'),
-  );
+  host.wasmPaths.treeSitter = context.asAbsolutePath(path.join('parsers', 'tree-sitter.wasm'));
 
-  const log = outputChannel
-    ? (msg: string) => outputChannel.appendLine(msg)
-    : undefined;
+  const log = outputChannel ? (msg: string) => outputChannel.appendLine(msg) : undefined;
 
   initOnce = (async () => {
     const result = await loadGrammars(host, log);
@@ -60,5 +52,3 @@ export async function loadGrammarsOnce(
 export function getLoadedGrammarsSummary(): GrammarSummary {
   return { ...grammarSummary };
 }
-
-

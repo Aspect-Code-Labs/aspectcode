@@ -81,9 +81,7 @@ async function updateStatusBar(): Promise<void> {
     statusBarItem.text = '$(beaker)';
     statusBarItem.tooltip = 'Aspect Code: Disabled — click to enable';
     statusBarItem.command = 'aspectcode.toggleExtensionEnabled';
-    statusBarItem.backgroundColor = new vscode.ThemeColor(
-      'statusBarItem.warningBackground',
-    );
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     statusBarItem.show();
     return;
   }
@@ -109,9 +107,7 @@ async function updateStatusBar(): Promise<void> {
     statusBarItem.text = '$(beaker)';
     statusBarItem.tooltip = 'Aspect Code: KB is stale — click to regenerate';
     statusBarItem.command = 'aspectcode.generate';
-    statusBarItem.backgroundColor = new vscode.ThemeColor(
-      'statusBarItem.warningBackground',
-    );
+    statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     statusBarItem.show();
     return;
   }
@@ -159,7 +155,7 @@ async function maybeShowSetupPrompt(
   }
 
   const action = await vscode.window.showInformationMessage(
-    'This repo doesn\'t have Aspect Code configured. Set up AI assistant context?',
+    "This repo doesn't have Aspect Code configured. Set up AI assistant context?",
     'Set Up',
     'Not for This Repo',
     'Never Ask',
@@ -228,11 +224,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push({ dispose: () => disposeFileDiscoveryService() });
     outputChannel.appendLine('[Startup] FileDiscoveryService initialized');
 
-    workspaceFingerprint = new WorkspaceFingerprint(
-      workspaceRoot,
-      extensionVersion,
-      outputChannel,
-    );
+    workspaceFingerprint = new WorkspaceFingerprint(workspaceRoot, extensionVersion, outputChannel);
     context.subscriptions.push(workspaceFingerprint);
 
     // Initialize fingerprint service with project-local mode and keep it updated.
@@ -246,10 +238,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const refreshFromAspectSettings = async () => {
       try {
-        const mode = await getUpdateRateSetting(
-          vscode.Uri.file(workspaceRoot),
-          outputChannel,
-        );
+        const mode = await getUpdateRateSetting(vscode.Uri.file(workspaceRoot), outputChannel);
         workspaceFingerprint?.setAutoRegenerateKbMode(mode);
       } catch {
         /* Ignore */
@@ -335,9 +324,21 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const normalized = filePath.replace(/\\/g, '/').toLowerCase();
     const excludedSegments = [
-      '/node_modules/', '/.git/', '/__pycache__/', '/.venv/', '/venv/',
-      '/build/', '/dist/', '/target/', '/coverage/', '/.next/',
-      '/.pytest_cache/', '/.mypy_cache/', '/.tox/', '/htmlcov/', '/.aspect/',
+      '/node_modules/',
+      '/.git/',
+      '/__pycache__/',
+      '/.venv/',
+      '/venv/',
+      '/build/',
+      '/dist/',
+      '/target/',
+      '/coverage/',
+      '/.next/',
+      '/.pytest_cache/',
+      '/.mypy_cache/',
+      '/.tox/',
+      '/htmlcov/',
+      '/.aspect/',
     ];
     return !excludedSegments.some((seg) => normalized.includes(seg));
   };
