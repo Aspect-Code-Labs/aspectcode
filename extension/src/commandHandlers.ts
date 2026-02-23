@@ -105,6 +105,11 @@ export function activateCommands(
       if (!(await requireExtensionEnabled())) return;
       return await handleGenerate(state, channel, context, undefined, onStatusBarUpdate);
     }),
+
+    vscode.commands.registerCommand('aspectcode.generateKb', async () => {
+      if (!(await requireExtensionEnabled())) return;
+      return await handleGenerateKb(state, channel, context, onStatusBarUpdate);
+    }),
   );
 
   // ── Deletion notifications ────────────────────────────────────────────
@@ -513,5 +518,57 @@ async function handleGenerate(
   } catch (error) {
     outputChannel.appendLine(`[Generate] Error: ${error}`);
     vscode.window.showErrorMessage(`Failed to generate: ${error}`);
+  }
+}
+
+/**
+ * Dedicated "Generate Knowledge Base" command.
+ * Unconditionally generates/updates kb.md, persists `generateKb: true`
+ * in aspectcode.json so auto-regen keeps the KB current, and refreshes
+ * instruction files with KB-aware content.
+ */
+async function handleGenerateKb(
+  state: AspectCodeState,
+  outputChannel: vscode.OutputChannel,
+  context?: vscode.ExtensionContext,
+  onStatusBarUpdate?: () => Promise<void>,
+): Promise<void> {
+  try {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+      vscode.window.showErrorMessage('No workspace folder open');
+      return;
+    }
+    const workspaceRoot = workspaceFolders[0].uri;
+
+    outputChannel.appendLine('[GenerateKB] Starting KB generation...');
+
+    // Persist generateKb: true so auto-regen keeps KB current
+    await updateAspectSettings(workspaceRoot, { generateKb: true });
+    outputChannel.appendLine('[GenerateKB] Persisted generateKb: true');
+
+    // Unconditionally generate/update kb.md
+    await generateKnowledgeBase(workspaceRoot, state, outputChannel, context);
+
+    // Refresh instruction files with KB-aware content
+    await emitInstructionFilesOnlyViaEmitters(workspaceRoot, outputChannel);
+
+    // Mark KB as fresh
+    try {
+      const { getWorkspaceFingerprint } = await import('./extension');
+      const fingerprint = getWorkspaceFingerprint();
+      if (fingerprint) {
+        await fingerprint.markKbFresh();
+        outputChannel.appendLine('[GenerateKB] Marked KB as fresh');
+      }
+    } catch (e) {
+      outputChannel.appendLine(`[GenerateKB] Failed to mark KB fresh (non-critical): ${e}`);
+    }
+
+    vscode.window.showInformationMessage('Knowledge base generated (kb.md)');
+    void onStatusBarUpdate?.();
+  } catch (error) {
+    outputChannel.appendLine(`[GenerateKB] Error: ${error}`);
+    vscode.window.showErrorMessage(`Failed to generate knowledge base: ${error}`);
   }
 }
