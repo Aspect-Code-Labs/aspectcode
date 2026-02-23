@@ -1,6 +1,7 @@
 {
   "name": "@aspectcode/optimizer",
   "version": "0.2.1",
+  "private": true,
   "description": "LLM-powered instruction optimizer for Aspect Code",
   "license": "MIT",
   "main": "dist/index.js",

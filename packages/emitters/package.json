@@ -1,6 +1,7 @@
 {
   "name": "@aspectcode/emitters",
   "version": "0.2.1",
+  "private": true,
   "description": "Artifact emitters for Aspect Code — KB, instructions, manifest",
   "license": "MIT",
   "main": "dist/index.js",

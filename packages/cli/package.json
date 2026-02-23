@@ -1,6 +1,6 @@
 {
   "name": "aspectcode",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "CLI for Aspect Code — generate knowledge-base artifacts from the command line",
   "license": "MIT",
   "main": "dist/main.js",
@@ -36,8 +36,15 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
+    "prepack": "node scripts/prepack.mjs",
+    "postpack": "node scripts/postpack.mjs",
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'"
   },
+  "bundledDependencies": [
+    "@aspectcode/core",
+    "@aspectcode/emitters",
+    "@aspectcode/optimizer"
+  ],
   "dependencies": {
     "@aspectcode/core": "0.2.1",
     "@aspectcode/emitters": "0.2.1",
