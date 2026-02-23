@@ -2,8 +2,8 @@
  * Gitignore Service for Aspect Code
  *
  * Manages .gitignore entries for Aspect Code generated files.
- * Each target file (e.g., .aspect/, AGENTS.md, CLAUDE.md) is managed separately
- * with user opt-in stored in .aspect/.settings.json
+ * Each target file (e.g., kb.md, AGENTS.md, CLAUDE.md) is managed separately
+ * with user opt-in stored in aspectcode.json
  *
  * Design principles:
  * - Opt-in per file: user is prompted for each target file separately
@@ -31,7 +31,7 @@ const ASPECT_CODE_BLOCK_START = '# Aspect Code (local AI context)';
  * (The GitignoreTarget is already the pattern itself, but we keep this for clarity)
  */
 const TARGET_TO_PATTERN: Record<GitignoreTarget, string> = {
-  '.aspect/': '.aspect/',
+  'kb.md': 'kb.md',
   'AGENTS.md': 'AGENTS.md',
   'CLAUDE.md': 'CLAUDE.md',
   '.github/copilot-instructions.md': '.github/copilot-instructions.md',
@@ -155,10 +155,8 @@ function isManagedEntryLine(line: string): boolean {
   const lower = trimmed.toLowerCase();
   // All entries we manage (includes new entries for opt-in system)
   return (
-    lower === '.aspect/' ||
-    lower === '.aspect' ||
-    lower === '/.aspect/' ||
-    lower === '/.aspect' ||
+    lower === 'kb.md' ||
+    lower === '/kb.md' ||
     lower === 'agents.md' ||
     lower === '/agents.md' ||
     lower === 'claude.md' ||
@@ -198,7 +196,7 @@ export interface EnsureGitignoreForTargetResult {
 /**
  * Ensures a specific target is added to .gitignore, with opt-in prompt.
  *
- * This function checks the user's preference stored in .aspect/.settings.json.
+ * This function checks the user's preference stored in aspectcode.json.
  * If no preference exists, it prompts the user.
  * If user agrees, it adds the entry to .gitignore.
  *
@@ -357,8 +355,8 @@ export async function ensureGitignoreForTarget(
  */
 function getTargetInfo(target: GitignoreTarget): IgnoreTarget {
   switch (target) {
-    case '.aspect/':
-      return { kind: 'dir', name: '.aspect' };
+    case 'kb.md':
+      return { kind: 'file', name: 'kb.md' };
     case 'AGENTS.md':
       return { kind: 'file', name: 'AGENTS.md' };
     case 'CLAUDE.md':

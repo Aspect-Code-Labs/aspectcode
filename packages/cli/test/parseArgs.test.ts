@@ -58,6 +58,11 @@ describe('parseArgs', () => {
     assert.equal(r.flags.listConnections, true);
   });
 
+  it('parses --kb', () => {
+    const r = parseArgs([...base, 'generate', '--kb']);
+    assert.equal(r.flags.kb, true);
+  });
+
   it('parses --json', () => {
     const r = parseArgs([...base, 'generate', '--json']);
     assert.equal(r.flags.json, true);

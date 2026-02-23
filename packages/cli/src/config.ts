@@ -2,7 +2,6 @@
  * aspectcode CLI — config file handling.
  *
  * The CLI looks for `aspectcode.json` in the workspace root.
- * This replaces the extension's `.aspect/.settings.json`.
  */
 
 import * as fs from 'fs';
@@ -23,6 +22,9 @@ export interface AspectCodeConfig {
 
   /** Extra directories to exclude from analysis. */
   exclude?: string[];
+
+  /** Whether to generate the kb.md knowledge base file. */
+  generateKb?: boolean;
 }
 
 export type RawAspectCodeConfig = Record<string, unknown>;

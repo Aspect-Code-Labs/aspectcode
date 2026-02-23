@@ -25,6 +25,7 @@ interface AssistantsOverride {
 import {
   getAssistantsSettings,
   getInstructionsModeSetting,
+  getGenerateKbSetting,
   updateAspectSettings,
   getExtensionEnabledSetting,
   setExtensionEnabledSetting,
@@ -116,14 +117,12 @@ export function activateCommands(
     if (!workspaceRoot) return;
 
     const detected = await detectAssistants(workspaceRoot);
-    const hasAspectKB = detected.has('aspectKB');
 
     const instructionAssistants = new Set(detected);
     instructionAssistants.delete('aspectKB');
     const hasInstructionFiles = instructionAssistants.size > 0;
-    const setupComplete = hasAspectKB && hasInstructionFiles;
 
-    if (showNotificationOnMissing && !setupComplete) {
+    if (showNotificationOnMissing && !hasInstructionFiles) {
       const isSuppressed = context.workspaceState.get<boolean>(
         SUPPRESS_DELETED_NOTIFICATION_KEY,
         false,
@@ -137,11 +136,9 @@ export function activateCommands(
       if (now - lastNotificationTime > NOTIFICATION_DEBOUNCE_MS) {
         lastNotificationTime = now;
         channel.appendLine(
-          `[Watcher] Detected missing files: aspectKB=${hasAspectKB}, instructionFiles=${hasInstructionFiles}`,
+          `[Watcher] Detected missing instruction files`,
         );
-        const message = !hasAspectKB
-          ? 'Aspect Code: Knowledge base (.aspect/) was deleted.'
-          : 'Aspect Code: AI instruction files were deleted.';
+        const message = 'Aspect Code: AI instruction files were deleted.';
         const action = await vscode.window.showWarningMessage(
           message + ' Regenerate to restore AI assistant context.',
           'Regenerate',
@@ -167,39 +164,19 @@ export function activateCommands(
 
   // ── File Watchers ─────────────────────────────────────────────────────
 
-  // .aspect/ folder and contents
-  const aspectWatcher = vscode.workspace.createFileSystemWatcher('**/.aspect{,/**}');
-  aspectWatcher.onDidCreate((uri) => {
-    channel.appendLine(`[Watcher] .aspect created: ${uri.fsPath}`);
+  // kb.md at workspace root
+  const kbFileWatcher = vscode.workspace.createFileSystemWatcher('**/kb.md');
+  kbFileWatcher.onDidCreate(() => {
+    channel.appendLine('[Watcher] kb.md created');
     debouncedInstructionUpdate(false);
     void onStatusBarUpdate?.();
   });
-  aspectWatcher.onDidChange(async (uri) => {
-    // When .aspect/instructions.md changes, regenerate instruction files
-    // so the custom content flows through to assistant configs.
-    if (uri.fsPath.endsWith('instructions.md')) {
-      const workspaceRoot = getWorkspaceRoot();
-      if (workspaceRoot) {
-        try {
-          const mode = await getInstructionsModeSetting(workspaceRoot, channel);
-          if (mode === 'custom') {
-            channel.appendLine(
-              '[Instructions] Custom instructions.md changed — regenerating instruction files',
-            );
-            await emitInstructionFilesOnlyViaEmitters(workspaceRoot, channel);
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  });
-  aspectWatcher.onDidDelete((uri) => {
-    channel.appendLine(`[Watcher] .aspect deleted: ${uri.fsPath}`);
-    debouncedInstructionUpdate(true);
+  kbFileWatcher.onDidDelete(() => {
+    channel.appendLine('[Watcher] kb.md deleted');
+    debouncedInstructionUpdate(false);
     void onStatusBarUpdate?.();
   });
-  context.subscriptions.push(aspectWatcher);
+  context.subscriptions.push(kbFileWatcher);
 
   // AI assistant instruction files
   const instructionFilesWatcher = vscode.workspace.createFileSystemWatcher('**/{AGENTS,CLAUDE}.md');
@@ -371,6 +348,14 @@ async function emitInstructionFilesOnlyViaEmitters(
   const mode = await getInstructionsModeSetting(workspaceRoot, outputChannel);
   const assistants =
     assistantsOverride ?? (await getAssistantsSettings(workspaceRoot, outputChannel));
+  const generateKbEnabled = await getGenerateKbSetting(workspaceRoot);
+
+  // Check if kb.md exists to pass context to instruction content generators
+  let kbExists = false;
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.joinPath(workspaceRoot, 'kb.md'));
+    kbExists = true;
+  } catch { /* kb.md doesn't exist */ }
 
   // ── Try CLI subprocess first ──────────────────────────────
   const cliResult = await cliGenerateWithInstructions(workspaceRoot.fsPath, assistants, {
@@ -408,6 +393,7 @@ async function emitInstructionFilesOnlyViaEmitters(
     outDir: workspaceRoot.fsPath,
     generatedAt,
     instructionsMode: mode,
+    generateKb: generateKbEnabled || kbExists,
     assistants,
   });
 
@@ -447,19 +433,21 @@ async function handleGenerate(
 
     const workspaceRoot = workspaceFolders[0].uri;
 
-    // Always ensure KB exists — generate if missing
-    const aspectDir = vscode.Uri.joinPath(workspaceRoot, '.aspect');
-    const architectureFile = vscode.Uri.joinPath(aspectDir, 'architecture.md');
-    let needsKbGeneration = false;
-    try {
-      await vscode.workspace.fs.stat(architectureFile);
-    } catch {
-      needsKbGeneration = true;
-    }
+    // Check if KB generation is enabled and needed
+    const generateKbEnabled = await getGenerateKbSetting(workspaceRoot);
+    if (generateKbEnabled) {
+      const kbFile = vscode.Uri.joinPath(workspaceRoot, 'kb.md');
+      let needsKbGeneration = false;
+      try {
+        await vscode.workspace.fs.stat(kbFile);
+      } catch {
+        needsKbGeneration = true;
+      }
 
-    if (needsKbGeneration) {
-      outputChannel.appendLine('[Generate] KB files not found, generating...');
-      await generateKnowledgeBase(workspaceRoot, state, outputChannel, context);
+      if (needsKbGeneration) {
+        outputChannel.appendLine('[Generate] KB file not found, generating...');
+        await generateKnowledgeBase(workspaceRoot, state, outputChannel, context);
+      }
     }
 
     // Generate instruction files (marker-based, idempotent)

@@ -29,6 +29,7 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     json: false,
     force: false,
     kbOnly: false,
+    kb: false,
     copilot: false,
     cursor: false,
     claude: false,
@@ -109,10 +110,10 @@ describe('settings commands', () => {
       custom: 123,
     });
 
-    let result = await runSetOutDir(makeCtx(tmpDir), '.aspect');
+    let result = await runSetOutDir(makeCtx(tmpDir), 'output');
     assert.equal(result.exitCode, 0);
     let cfg = readConfig(tmpDir);
-    assert.equal(cfg.outDir, '.aspect');
+    assert.equal(cfg.outDir, 'output');
     assert.equal(cfg.custom, 123);
 
     result = await runClearOutDir(makeCtx(tmpDir));

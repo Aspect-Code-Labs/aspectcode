@@ -7,10 +7,10 @@
 
 ## Overview
 
-Aspect Code generates a project-local knowledge base (`.aspect/` directory)
+Aspect Code generates a project-local knowledge base (`kb.md`)
 that helps AI coding assistants understand a codebase before making changes.
-It produces `architecture.md`, `map.md`, `context.md`, a `manifest.json`,
-and optional assistant-specific instruction files.
+It produces a single `kb.md` file (opt-in via `--kb` flag or `generateKb` config)
+and assistant-specific instruction files.
 
 **Everything runs offline.** There are no network calls, no telemetry, no
 phone-home checks. WASM grammars ship in-repo; all analysis is local.
@@ -152,8 +152,7 @@ aspectcode generate
   ├─ 2. fs.readFileSync each file        Node built-in
   ├─ 3. analyzeRepo(root, fileMap)        @aspectcode/core  (sync)
   └─ 4. runEmitters(model, host, opts)    @aspectcode/emitters
-       ├─ KB emitter → .aspect/{architecture,map,context}.md
-       ├─ Manifest writer → .aspect/manifest.json
+       ├─ KB emitter → kb.md (when --kb or generateKb: true)
        └─ Instructions emitter → AGENTS.md
 ```
 
@@ -215,10 +214,7 @@ CLI resolution order in `CliAdapter.resolveCliBin()`:
 
 | File | Source | Content |
 |------|--------|---------|
-| `.aspect/architecture.md` | KB emitter | Hub files, directory tree, entry points |
-| `.aspect/map.md` | KB emitter | Data models, symbol index, conventions |
-| `.aspect/context.md` | KB emitter | Module clusters, integrations, data flow |
-| `.aspect/manifest.json` | Manifest writer | Schema version, stats, file list |
+| `kb.md` | KB emitter | Architecture, map, context sections (opt-in) |
 | `.github/copilot-instructions.md` | Instructions emitter | Copilot rules (marker-wrapped) |
 | `.cursor/rules/aspect.mdc` | Instructions emitter | Cursor rules |
 | `CLAUDE.md` | Instructions emitter | Claude rules |

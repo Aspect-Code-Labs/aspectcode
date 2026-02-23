@@ -74,6 +74,9 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
     ? 'off'
     : (flags.instructionsMode ?? 'safe');
 
+  // KB generation: explicit --kb flag, --kb-only, or config setting
+  const generateKb = flags.kb || flags.kbOnly || config?.generateKb || false;
+
   if (!flags.kbOnly && !flags.json) {
     const targets = Object.entries(assistants)
       .filter(([, v]) => v)
@@ -89,6 +92,7 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
     outDir: resolvedOut,
     assistants,
     instructionsMode,
+    generateKb,
     fileContents,
   };
 

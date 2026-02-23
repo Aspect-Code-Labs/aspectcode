@@ -49,7 +49,7 @@ describe('InstructionsEmitter', () => {
     const text = fs.readFileSync(filePath, 'utf8');
     assert.ok(text.includes(ASPECT_CODE_START));
     assert.ok(text.includes(ASPECT_CODE_END));
-    assert.ok(text.includes('## Aspect Code Knowledge Base'));
+    assert.ok(text.includes('## Aspect Code'));
   });
 
   it('updates between markers only', async () => {
@@ -77,7 +77,7 @@ describe('InstructionsEmitter', () => {
     assert.ok(updated.startsWith(before), 'Preamble should be unchanged');
     assert.ok(updated.endsWith(after), 'Trailing content should be unchanged');
     assert.ok(!updated.includes('OLD CONTENT'), 'Old marker content should be replaced');
-    assert.ok(updated.includes('## Aspect Code Knowledge Base'), 'New canonical content should be inserted');
+    assert.ok(updated.includes('## Aspect Code'), 'New canonical content should be inserted');
   });
 
   it('leaves external edits untouched', async () => {

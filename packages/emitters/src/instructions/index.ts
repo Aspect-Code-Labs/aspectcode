@@ -9,6 +9,8 @@ export {
   generateCanonicalContentForMode,
   generateCanonicalContentSafe,
   generateCanonicalContentPermissive,
+  generateCanonicalContentSafeKB,
+  generateCanonicalContentPermissiveKB,
   generateCopilotContent,
   generateCursorContent,
   generateClaudeContent,

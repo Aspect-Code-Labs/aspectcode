@@ -67,7 +67,7 @@ Full architecture: [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)
 ## CLI Testing (Safe Sandbox)
 
 When manually exercising the CLI during development, **always use the
-sandbox test runner** to avoid writing `.aspect/` or `AGENTS.md` into
+sandbox test runner** to avoid writing `kb.md` or `AGENTS.md` into
 the repo root:
 
 ```bash

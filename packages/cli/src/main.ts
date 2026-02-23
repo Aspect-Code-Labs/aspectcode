@@ -48,6 +48,7 @@ export function parseArgs(argv: string[]): CliArgs {
     json: false,
     force: false,
     kbOnly: false,
+    kb: false,
     copilot: false,
     cursor: false,
     claude: false,
@@ -149,6 +150,7 @@ ${optionLines.join('\n')}
 ${fmt.bold('EXAMPLES')}
   aspectcode init
   aspectcode generate
+  aspectcode generate --kb
   aspectcode gen --copilot --cursor
   aspectcode g --json
   aspectcode impact --file src/app.ts

@@ -20,6 +20,7 @@ function makeFlags(overrides: Partial<CliFlags> = {}): CliFlags {
     json: false,
     force: false,
     kbOnly: false,
+    kb: false,
     copilot: false,
     cursor: false,
     claude: false,

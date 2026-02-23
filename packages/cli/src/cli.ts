@@ -45,6 +45,7 @@ export const FLAG_DEFS: readonly FlagDef[] = [
   { name: 'list-connections',       type: 'boolean', description: 'Print dependency connections',      appliesTo: ['generate'], prop: 'listConnections' },
   { name: 'mode',                   type: 'enum',    description: 'Watch mode: manual|onChange|idle',   appliesTo: ['watch'], values: ['manual', 'onChange', 'idle'] },
   { name: 'kb-only',                type: 'boolean', description: 'Generate KB artifacts only (skip instruction files)', appliesTo: ['generate'], prop: 'kbOnly' },
+  { name: 'kb',                      type: 'boolean', description: 'Generate kb.md knowledge base file',                  appliesTo: ['generate'] },
   { name: 'copilot',                type: 'boolean', description: 'Enable Copilot instruction file',   appliesTo: ['generate'] },
   { name: 'cursor',                 type: 'boolean', description: 'Enable Cursor instruction file',    appliesTo: ['generate'] },
   { name: 'claude',                 type: 'boolean', description: 'Enable Claude instruction file',    appliesTo: ['generate'] },
@@ -91,6 +92,9 @@ export interface CliFlags {
 
   /** --kb-only: generate KB artifacts only, skip instruction files. */
   kbOnly: boolean;
+
+  /** --kb: generate kb.md knowledge base file. */
+  kb: boolean;
 
   /** --copilot: enable Copilot instruction file. */
   copilot: boolean;

@@ -12,7 +12,7 @@ import type { ExclusionSettings } from './DirectoryExclusion';
 // Re-export ExclusionSettings for consumers
 export type { ExclusionSettings } from './DirectoryExclusion';
 
-export type InstructionsMode = 'safe' | 'custom' | 'off';
+export type InstructionsMode = 'safe' | 'permissive' | 'off';
 type UpdateRateMode = 'manual' | 'onChange' | 'idle';
 export type AutoRegenerateKbMode = UpdateRateMode | 'off' | 'onSave';
 
@@ -26,14 +26,14 @@ export interface AssistantsSettings {
 
 // File paths that can be individually configured for gitignore
 export type GitignoreTarget =
-  | '.aspect/'
+  | 'kb.md'
   | 'AGENTS.md'
   | 'CLAUDE.md'
   | '.github/copilot-instructions.md'
   | '.cursor/rules/aspectcode.mdc';
 
 const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
-  '.aspect/',
+  'kb.md',
   'AGENTS.md',
   'CLAUDE.md',
   '.github/copilot-instructions.md',
@@ -70,9 +70,15 @@ interface AspectSettings {
   autoRegenerateKb?: 'off' | 'onSave' | 'idle';
 
   /**
-   * Instructions mode: 'safe' or 'custom'
+   * Instructions mode: 'safe' | 'permissive' | 'off'
    */
   instructionsMode?: InstructionsMode;
+
+  /**
+   * Whether to generate the KB file (kb.md).
+   * When false (default), only instruction file sections are generated.
+   */
+  generateKb?: boolean;
 
   /**
    * Master enable/disable switch for the extension.
@@ -97,7 +103,9 @@ function cacheKey(workspaceRoot: vscode.Uri): string {
 }
 
 function normalizeInstructionsMode(value: unknown): InstructionsMode | undefined {
-  if (value === 'safe' || value === 'custom' || value === 'off') return value;
+  if (value === 'safe' || value === 'permissive' || value === 'off') return value;
+  // Migrate legacy 'custom' to 'safe'
+  if (value === 'custom') return 'safe';
   return undefined;
 }
 
@@ -326,18 +334,16 @@ export async function getInstructionsModeSetting(
   workspaceRoot: vscode.Uri,
   _outputChannel?: vscode.OutputChannel,
 ): Promise<InstructionsMode> {
-  // Auto-detect .aspect/instructions.md → custom mode
-  try {
-    const customPath = vscode.Uri.joinPath(workspaceRoot, '.aspect', 'instructions.md');
-    await vscode.workspace.fs.stat(customPath);
-    return 'custom';
-  } catch {
-    // File doesn't exist — fall through
-  }
-
   // Read persisted value from aspectcode.json (default: 'safe')
   const settings = await readAspectSettings(workspaceRoot);
   return settings.instructionsMode ?? 'safe';
+}
+
+export async function getGenerateKbSetting(
+  workspaceRoot: vscode.Uri,
+): Promise<boolean> {
+  const settings = await readAspectSettings(workspaceRoot);
+  return settings.generateKb === true;
 }
 
 export async function getUpdateRateSetting(
@@ -420,8 +426,8 @@ export async function setGitignorePreference(
  */
 function getTargetDescription(target: GitignoreTarget): string {
   switch (target) {
-    case '.aspect/':
-      return 'the Aspect Code knowledge base (.aspect/)';
+    case 'kb.md':
+      return 'the Aspect Code knowledge base (kb.md)';
     case 'AGENTS.md':
       return 'AGENTS.md (general AI instructions)';
     case 'CLAUDE.md':
@@ -437,7 +443,7 @@ function getTargetDescription(target: GitignoreTarget): string {
  * Prompt the user about adding a target to .gitignore
  * Returns their choice (true = add, false = don't add)
  * Returns undefined if user dismissed without choosing (don't persist)
- * Also persists the choice to .aspect/.settings.json
+ * Also persists the choice to aspectcode.json
  */
 export async function promptGitignorePreference(
   workspaceRoot: vscode.Uri,

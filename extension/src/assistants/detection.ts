@@ -4,7 +4,7 @@ export type AssistantId = 'copilot' | 'cursor' | 'claude' | 'other' | 'aspectKB'
 
 /**
  * Detects which AI assistants are likely in use by checking for their config files.
- * Also detects if Aspect Code KB (.aspect/) exists, indicating prior configuration.
+ * Also detects if Aspect Code KB (kb.md) exists, indicating prior configuration.
  * Uses parallel file stat operations for speed.
  */
 export async function detectAssistants(workspaceRoot: vscode.Uri): Promise<Set<AssistantId>> {
@@ -12,7 +12,7 @@ export async function detectAssistants(workspaceRoot: vscode.Uri): Promise<Set<A
 
   // Check all paths in parallel for maximum speed
   const checks: Array<{ id: AssistantId; paths: string[] }> = [
-    { id: 'aspectKB', paths: ['.aspect'] },
+    { id: 'aspectKB', paths: ['kb.md'] },
     { id: 'copilot', paths: ['.github/copilot-instructions.md'] },
     { id: 'cursor', paths: ['.cursor', '.cursorrules'] },
     { id: 'claude', paths: ['CLAUDE.md'] },
