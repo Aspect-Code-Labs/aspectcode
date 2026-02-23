@@ -87,8 +87,6 @@ describe('parseArgs', () => {
     const commands = [
       'show-config',
       'set-update-rate',
-      'set-out-dir',
-      'clear-out-dir',
       'add-exclude',
       'remove-exclude',
     ];
@@ -112,12 +110,6 @@ describe('parseArgs', () => {
   it('ignores invalid mode values', () => {
     const r = parseArgs([...base, 'watch', '--mode=invalid']);
     assert.equal(r.flags.mode, undefined);
-  });
-
-  it('parses --force / -f', () => {
-    const r = parseArgs([...base, 'init', '--force']);
-    assert.equal(r.command, 'init');
-    assert.equal(r.flags.force, true);
   });
 
   it('parses --verbose and --quiet', () => {

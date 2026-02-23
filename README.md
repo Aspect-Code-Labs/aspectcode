@@ -84,19 +84,17 @@ npm run build
 ### CLI Usage
 
 ```bash
-node packages/cli/bin/aspectcode.js init         # create aspectcode.json
 node packages/cli/bin/aspectcode.js generate      # build KB artifacts
 node packages/cli/bin/aspectcode.js generate -v   # verbose output
 node packages/cli/bin/aspectcode.js generate --kb-only  # KB only, skip instructions
 node packages/cli/bin/aspectcode.js generate --list-connections --file src/app.ts
-node packages/cli/bin/aspectcode.js impact --file src/app.ts   # impact analysis
+node packages/cli/bin/aspectcode.js deps impact --file src/app.ts   # impact analysis
 node packages/cli/bin/aspectcode.js deps list --file src/app.ts
 node packages/cli/bin/aspectcode.js watch         # watch + regenerate on changes
 node packages/cli/bin/aspectcode.js watch --mode idle
 node packages/cli/bin/aspectcode.js show-config
 node packages/cli/bin/aspectcode.js set-update-rate idle
 node packages/cli/bin/aspectcode.js generate --kb     # include KB (kb.md)
-node packages/cli/bin/aspectcode.js clear-out-dir
 node packages/cli/bin/aspectcode.js add-exclude dist
 node packages/cli/bin/aspectcode.js remove-exclude dist
 ```

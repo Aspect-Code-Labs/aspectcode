@@ -188,32 +188,8 @@ function Test-RepoExhaustive {
   }))
 
   # ────────────────────────────────────────────────────────────
-  # 2. init (creates aspectcode.json in clone dir)
+  # 2. settings commands (operate on aspectcode.json in clone)
   # ────────────────────────────────────────────────────────────
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] init --quiet" -Action {
-    Invoke-Cli "init --root `"$CloneDir`" --quiet"
-  }))
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] init --force --quiet (idempotent)" -Action {
-    Invoke-Cli "init --root `"$CloneDir`" --force --quiet"
-  }))
-
-  # ────────────────────────────────────────────────────────────
-  # 3. settings commands (operate on aspectcode.json in clone)
-  # ────────────────────────────────────────────────────────────
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] set-out-dir" -Action {
-    Invoke-Cli "set-out-dir `"$OutDir`" --root `"$CloneDir`" --quiet"
-  }))
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] show-config after set-out-dir" -Action {
-    Invoke-Cli "show-config --root `"$CloneDir`" --quiet"
-  }))
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] clear-out-dir" -Action {
-    Invoke-Cli "clear-out-dir --root `"$CloneDir`" --quiet"
-  }))
 
   [void]$results.Add((Invoke-Step -Name "[$RepoName] set-update-rate onChange" -Action {
     Invoke-Cli "set-update-rate onChange --root `"$CloneDir`" --quiet"
@@ -235,19 +211,8 @@ function Test-RepoExhaustive {
     Invoke-Cli "remove-exclude vendor --root `"$CloneDir`" --quiet"
   }))
 
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] settings --json round-trip" -Action {
-    $tmpJson = Join-Path $env:TEMP "aspectcode-settings-$RepoName.json"
-    if (Test-Path $tmpJson) { Remove-Item $tmpJson -Force }
-    cmd.exe /d /s /c "node `"$cliBin`" set-out-dir `"$OutDir`" --root `"$CloneDir`" --json 1>`"$tmpJson`" 2>nul"
-    $raw = Get-Content $tmpJson -Raw
-    $parsed = $raw | ConvertFrom-Json
-    if ($parsed.ok -ne $true) { throw "set-out-dir --json returned ok=$($parsed.ok)" }
-    # Clean up: clear it again
-    Invoke-Cli "clear-out-dir --root `"$CloneDir`" --quiet"
-  }))
-
   # ────────────────────────────────────────────────────────────
-  # 4. generate — default (AGENTS.md)
+  # 3. generate — default (AGENTS.md)
   # ────────────────────────────────────────────────────────────
 
   [void]$results.Add((Invoke-Step -Name "[$RepoName] generate (default, --out)" -Action {
@@ -424,25 +389,25 @@ function Test-RepoExhaustive {
   }))
 
   # ────────────────────────────────────────────────────────────
-  # 8. impact
+  # 8. deps impact
   # ────────────────────────────────────────────────────────────
 
   if ($sourceFile) {
-    [void]$results.Add((Invoke-Step -Name "[$RepoName] impact --file $sourceFile" -Action {
-      Invoke-Cli "impact --root `"$CloneDir`" --file `"$sourceFile`" --quiet"
+    [void]$results.Add((Invoke-Step -Name "[$RepoName] deps impact --file $sourceFile" -Action {
+      Invoke-Cli "deps impact --root `"$CloneDir`" --file `"$sourceFile`" --quiet"
     }))
 
-    [void]$results.Add((Invoke-Step -Name "[$RepoName] impact --file $sourceFile --json" -Action {
+    [void]$results.Add((Invoke-Step -Name "[$RepoName] deps impact --file $sourceFile --json" -Action {
       $tmpJson = Join-Path $env:TEMP "aspectcode-impact-$RepoName.json"
       if (Test-Path $tmpJson) { Remove-Item $tmpJson -Force }
-      cmd.exe /d /s /c "node `"$cliBin`" impact --root `"$CloneDir`" --file `"$sourceFile`" --json 1>`"$tmpJson`" 2>nul"
+      cmd.exe /d /s /c "node `"$cliBin`" deps impact --root `"$CloneDir`" --file `"$sourceFile`" --json 1>`"$tmpJson`" 2>nul"
       $raw = Get-Content $tmpJson -Raw
       $null = $raw | ConvertFrom-Json
       if (-not $raw.TrimStart().StartsWith('{')) { throw 'JSON output is not a JSON object' }
     }))
 
-    [void]$results.Add((Invoke-Step -Name "[$RepoName] impact --file $sourceFile --verbose" -Action {
-      Invoke-Cli "impact --root `"$CloneDir`" --file `"$sourceFile`" --verbose"
+    [void]$results.Add((Invoke-Step -Name "[$RepoName] deps impact --file $sourceFile --verbose" -Action {
+      Invoke-Cli "deps impact --root `"$CloneDir`" --file `"$sourceFile`" --verbose"
     }))
   }
 
@@ -480,11 +445,6 @@ function Test-RepoExhaustive {
   [void]$results.Add((Invoke-Step -Name "[$RepoName] unknown flag still succeeds" -Action {
     & $cleanOut
     Invoke-Cli "gen --root `"$CloneDir`" --out `"$OutDir`" --bogus-flag --quiet"
-  }))
-
-  [void]$results.Add((Invoke-Step -Name "[$RepoName] set-out-dir '' exits 2 (empty)" -Action {
-    cmd.exe /d /s /c "node `"$cliBin`" set-out-dir `"`" --root `"$CloneDir`" --quiet 2>nul"
-    if ($LASTEXITCODE -ne 2) { throw "Expected exit 2, got $LASTEXITCODE" }
   }))
 
   [void]$results.Add((Invoke-Step -Name "[$RepoName] set-update-rate invalid exits 2" -Action {

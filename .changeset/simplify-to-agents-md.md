@@ -3,23 +3,32 @@
 "aspectcode": patch
 ---
 
-Simplify instruction output to AGENTS.md only
+Simplify instruction output to AGENTS.md only; trim CLI surface
 
 Removed all multi-assistant generation infrastructure. The CLI and extension now
 produce a single `AGENTS.md` instruction file unconditionally — there are no
 assistant-selection flags, no quickpick UI, and no per-assistant content
 generators.
 
+Additionally, the CLI surface was trimmed:
+- **Removed `init` command** — settings commands auto-create `aspectcode.json` when needed.
+- **Removed `outDir` persistence** — `set-out-dir` / `clear-out-dir` commands deleted; `outDir` config key removed. Use `--out` flag at runtime instead.
+- **Consolidated `impact` → `deps impact`** — impact analysis is now a subcommand of `deps` alongside `deps list`.
+
 ### What changed
 
-**Removed CLI flags:** `--copilot`, `--cursor`, `--claude`, `--other`
+**Removed CLI flags:** `--copilot`, `--cursor`, `--claude`, `--other`, `--force` / `-f`
+**Removed CLI commands:** `init`, `impact` (standalone), `set-out-dir`, `clear-out-dir`
 **Removed extension command:** `aspectcode.configureAssistants`
 **Removed types:** `AssistantFlags`, `AssistantsSettings`, `AssistantsOverride`
+**Removed config key:** `outDir`
 **Removed functions:** `getAssistantsSettings()`, `handleConfigureAssistants()`,
 `generateCopilotContent()`, `generateCursorContent()`, `generateClaudeContent()`,
-`detectAssistants()`
+`detectAssistants()`, `runInit()`, `runSetOutDir()`, `runClearOutDir()`,
+`printAspectCodeBanner()`
 **Removed output files:** `.github/copilot-instructions.md`,
 `.cursor/rules/aspectcode.mdc`, `CLAUDE.md`
+**Consolidated:** `runImpact()` → `runDepsImpact()` (now in `deps.ts`)
 
 ### CLI commands (current state)
 
@@ -31,15 +40,12 @@ aspectcode <command> [options]
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `init` | | Create an `aspectcode.json` config file |
 | `generate` | `gen`, `g` | Discover, analyze, and emit KB + AGENTS.md |
 | `watch` | | Watch source files and regenerate on changes |
-| `impact` | | Compute dependency impact for a single file |
 | `deps list` | | List dependency connections |
+| `deps impact` | | Compute dependency impact for a single file |
 | `show-config` | | Print current `aspectcode.json` values |
 | `set-update-rate <mode>` | | Set updateRate (`manual` / `onChange` / `idle`) |
-| `set-out-dir <path>` | | Set output directory |
-| `clear-out-dir` | | Remove output directory override |
 | `add-exclude <path>` | | Add a path to the exclude list |
 | `remove-exclude <path>` | | Remove a path from the exclude list |
 
@@ -66,19 +72,13 @@ aspectcode <command> [options]
 | `--list-connections` | | Print dependency connections |
 | `--file <path>` | | Filter connections to one file |
 
-#### `init` flags
-
-| Flag | Description |
-|------|-------------|
-| `--force` / `-f` | Overwrite existing `aspectcode.json` |
-
 #### `watch` flags
 
 | Flag | Description |
 |------|-------------|
 | `--mode <mode>` | Watch mode: `manual` / `onChange` / `idle` |
 
-#### `impact` flags
+#### `deps impact` flags
 
 | Flag | Description |
 |------|-------------|

@@ -24,11 +24,10 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
   const startMs = Date.now();
 
   // ── 1. Resolve options ────────────────────────────────────
-  const outDir = flags.out ?? config?.outDir ?? undefined;
-  const resolvedOut = outDir ? path.resolve(root, outDir) : root;
+  const resolvedOut = flags.out ? path.resolve(root, flags.out) : root;
   if (!flags.json) {
     log.info(`Workspace: ${fmt.cyan(root)}`);
-    if (outDir) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
+    if (flags.out) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
     log.blank();
   }
 

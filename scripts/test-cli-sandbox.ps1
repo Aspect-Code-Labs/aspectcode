@@ -138,10 +138,10 @@ if (-not $SkipBuild) {
   Write-Host "  JSON parsed OK" -ForegroundColor Gray
 }))
 
-[void]$results.Add((Invoke-Step -Name 'CLI impact (--root sandbox)' -Action {
+[void]$results.Add((Invoke-Step -Name 'CLI deps impact (--root sandbox)' -Action {
   $targetFile = 'src\app.ts'
-  & node $cliBin impact --root $sandboxRoot --file $targetFile --quiet 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "impact --file $targetFile failed" }
+  & node $cliBin deps impact --root $sandboxRoot --file $targetFile --quiet 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "deps impact --file $targetFile failed" }
 }))
 
 [void]$results.Add((Invoke-Step -Name 'CLI deps list (--root sandbox)' -Action {

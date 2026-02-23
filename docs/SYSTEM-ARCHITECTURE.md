@@ -1,7 +1,7 @@
 # System Architecture
 
 > Source-of-truth for layering, package responsibilities, and data flow.
-> Last updated: 2026-02-13 (CLI-first migration complete, impact command added).
+> Last updated: 2026-02-13 (CLI trimmed: init removed, impact → deps impact, outDir persistence removed).
 
 ---
 
@@ -101,21 +101,18 @@ No external command framework — hand-rolled argv parser.
 
 | Command | Purpose | Output mode |
 |---------|---------|-------------|
-| `aspectcode init` | Create `aspectcode.json` config file | human-readable |
 | `aspectcode generate` | Discover → analyze → emit (full pipeline) | human-readable by default, JSON with `--json`; dependency output can be scoped by `--file` |
 | `aspectcode watch` | Watch files and trigger `generate` by mode | long-running process |
-| `aspectcode impact` | Compute dependency impact for a single file | human-readable by default, JSON with `--json` |
 | `aspectcode deps list` | Compute and list dependency connections only | human-readable; supports `--file` filter |
+| `aspectcode deps impact` | Compute dependency impact for a single file | human-readable by default, JSON with `--json` |
 | `aspectcode show-config` | Print current `aspectcode.json` values | human-readable by default, JSON with `--json` |
 | `aspectcode set-update-rate` | Set canonical `updateRate` and remove legacy key | human-readable by default, JSON with `--json` |
-| `aspectcode set-out-dir` / `clear-out-dir` | Set or clear `outDir` | human-readable by default, JSON with `--json` |
 | `aspectcode add-exclude` / `remove-exclude` | Add or remove entries in `exclude` | human-readable by default, JSON with `--json` |
 
 Key flags:
 - Global-ish: `--root`, `--verbose`, `--quiet`, `--help`, `--version`
-- `init`: `--force`
 - `generate`: `--out`, `--list-connections`, `--json`, `--file`, `--kb-only`, `--instructions-mode`
-- `impact`: `--file` (required), `--json`
+- `deps impact`: `--file` (required), `--json`
 - `deps list`: `--file` (connection filtering)
 - `watch`: `--mode` (`manual|onChange|idle`)
 - settings commands: positional value where required, `--json`
@@ -197,8 +194,8 @@ User action (click / save / idle)
   │   └─ FALLBACK: createInstructionsEmitter().emit()
   │
   └─ computeImpactSummaryForFile()     extension/src/assistants/kb.ts
-      ├─ TRY: cliImpact(root, relPath)
-      │   (spawns: aspectcode impact --file <path> --json)
+      ├─ TRY: cliDepsImpact(root, relPath)
+      │   (spawns: aspectcode deps impact --file <path> --json)
       └─ FALLBACK: DependencyAnalyzer in-process
 ```
 
@@ -260,7 +257,7 @@ This keeps extension changes low-risk while command behavior stabilizes.
 |---------|--------|-------|-------|
 | `@aspectcode/core` | mocha + ts-node | 11 | Snapshot tests against fixture repo |
 | `@aspectcode/emitters` | mocha + ts-node | 79 | KB, instructions, manifest, transaction |
-| `aspectcode` | mocha + ts-node | 49 | parseArgs, config, init, generate, deps, watch |
+| `aspectcode` | mocha + ts-node | 44 | parseArgs, config, generate, deps, impact, settings, watch |
 | Extension | mocha + ts-node | 10 | KB invariant + shared analysis tests |
 
 All tests are offline. Temp directories via `os.tmpdir()`, fixed
@@ -295,10 +292,10 @@ npm test --workspaces
 **Done:**
 1. ✅ CLI test coverage expanded (49 tests covering all commands/flags).
 2. ✅ New CLI flags: `--kb-only`, `--instructions-mode`.
-3. ✅ New CLI command: `aspectcode impact --file <path> --json`.
-4. ✅ Extension spawns CLI for KB generation (`generate --json --kb-only`).
-5. ✅ Extension spawns CLI for instructions (`generate --json`).
-6. ✅ Extension spawns CLI for impact (`impact --file <path> --json`).
+4. ✅ New CLI command: `aspectcode deps impact --file <path> --json`.
+5. ✅ Extension spawns CLI for KB generation (`generate --json --kb-only`).
+6. ✅ Extension spawns CLI for instructions (`generate --json`).
+7. ✅ Extension spawns CLI for impact (`deps impact --file <path> --json`).
 7. ✅ `CliAdapter.ts` with hybrid resolution (local → npm → PATH).
 
 **Remaining:**
