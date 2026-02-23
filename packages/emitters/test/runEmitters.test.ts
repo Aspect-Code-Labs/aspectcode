@@ -78,7 +78,6 @@ describe('runEmitters', () => {
       fileContents,
       generateKb: true,
       instructionsMode: 'safe',
-      assistants: { copilot: true },
     });
 
     assert.equal(report.schemaVersion, '0.1');
@@ -88,7 +87,7 @@ describe('runEmitters', () => {
     assert.ok(fs.existsSync(path.join(outDir, 'kb.md')));
 
     // Instructions should also land under outDir
-    assert.ok(fs.existsSync(path.join(outDir, '.github', 'copilot-instructions.md')));
+    assert.ok(fs.existsSync(path.join(outDir, 'AGENTS.md')));
 
     // Ensure we did not implicitly write into workspaceRoot
     assert.ok(!fs.existsSync(path.join(workspaceDir, 'kb.md')));
@@ -126,7 +125,6 @@ describe('runEmitters', () => {
         fileContents,
         generateKb: true,
         instructionsMode: 'safe',
-        assistants: { copilot: true },
       });
     } catch {
       threw = true;
@@ -150,7 +148,6 @@ describe('runEmitters', () => {
       fileContents,
       generateKb: true,
       instructionsMode: 'safe',
-      assistants: { copilot: true },
     });
 
     const kbPath = path.join(outDir, 'kb.md');

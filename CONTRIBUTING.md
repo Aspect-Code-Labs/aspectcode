@@ -121,7 +121,7 @@ filter to a single repo:
 The test matrix per repo covers:
 - `init`, `init --force`
 - All settings commands (`set-out-dir`, `clear-out-dir`, `set-update-rate`, `add-exclude`, `remove-exclude`, `show-config`)
-- `generate` with every flag combination (`--kb-only`, `--copilot`, `--cursor`, `--claude`, `--other`, `--instructions-mode safe|permissive|off`, `--no-color`, `--verbose`, `--list-connections`)
+- `generate` with every flag combination (`--kb-only`, `--instructions-mode safe|permissive|off`, `--no-color`, `--verbose`, `--list-connections`)
 - `generate --json` with structure validation
 - `impact` and `deps list` (with `--file`, `--json`, `--list-connections`)
 - Error paths (unknown commands, invalid args)

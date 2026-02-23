@@ -1,9 +1,8 @@
 /**
  * Gitignore Service for Aspect Code
  *
- * Manages .gitignore entries for Aspect Code generated files.
- * Each target file (e.g., kb.md, AGENTS.md, CLAUDE.md) is managed separately
- * with user opt-in stored in aspectcode.json
+ * Manages .gitignore entries for Aspect Code generated files (kb.md, AGENTS.md).
+ * Each target file is managed separately with user opt-in stored in aspectcode.json
  *
  * Design principles:
  * - Opt-in per file: user is prompted for each target file separately
@@ -33,9 +32,6 @@ const ASPECT_CODE_BLOCK_START = '# Aspect Code (local AI context)';
 const TARGET_TO_PATTERN: Record<GitignoreTarget, string> = {
   'kb.md': 'kb.md',
   'AGENTS.md': 'AGENTS.md',
-  'CLAUDE.md': 'CLAUDE.md',
-  '.github/copilot-instructions.md': '.github/copilot-instructions.md',
-  '.cursor/rules/aspectcode.mdc': '.cursor/rules/aspectcode.mdc',
 };
 
 /**
@@ -153,18 +149,12 @@ function isManagedEntryLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed) return true; // allow blank lines within the block
   const lower = trimmed.toLowerCase();
-  // All entries we manage (includes new entries for opt-in system)
+  // All entries we manage
   return (
     lower === 'kb.md' ||
     lower === '/kb.md' ||
     lower === 'agents.md' ||
-    lower === '/agents.md' ||
-    lower === 'claude.md' ||
-    lower === '/claude.md' ||
-    lower === '.github/copilot-instructions.md' ||
-    lower === '/.github/copilot-instructions.md' ||
-    lower === '.cursor/rules/aspectcode.mdc' ||
-    lower === '/.cursor/rules/aspectcode.mdc'
+    lower === '/agents.md'
   );
 }
 
@@ -359,16 +349,11 @@ function getTargetInfo(target: GitignoreTarget): IgnoreTarget {
       return { kind: 'file', name: 'kb.md' };
     case 'AGENTS.md':
       return { kind: 'file', name: 'AGENTS.md' };
-    case 'CLAUDE.md':
-      return { kind: 'file', name: 'CLAUDE.md' };
-    case '.github/copilot-instructions.md':
-      return { kind: 'file', name: '.github/copilot-instructions.md' };
-    case '.cursor/rules/aspectcode.mdc':
-      return { kind: 'file', name: '.cursor/rules/aspectcode.mdc' };
-    default:
-      // Exhaustive check - should never reach here
+    default: {
+      // Exhaustive check
       const _exhaustive: never = target;
       throw new Error(`Unknown target: ${_exhaustive}`);
+    }
   }
 }
 

@@ -46,10 +46,6 @@ export const FLAG_DEFS: readonly FlagDef[] = [
   { name: 'mode',                   type: 'enum',    description: 'Watch mode: manual|onChange|idle',   appliesTo: ['watch'], values: ['manual', 'onChange', 'idle'] },
   { name: 'kb-only',                type: 'boolean', description: 'Generate KB artifacts only (skip instruction files)', appliesTo: ['generate'], prop: 'kbOnly' },
   { name: 'kb',                      type: 'boolean', description: 'Generate kb.md knowledge base file',                  appliesTo: ['generate'] },
-  { name: 'copilot',                type: 'boolean', description: 'Enable Copilot instruction file',   appliesTo: ['generate'] },
-  { name: 'cursor',                 type: 'boolean', description: 'Enable Cursor instruction file',    appliesTo: ['generate'] },
-  { name: 'claude',                 type: 'boolean', description: 'Enable Claude instruction file',    appliesTo: ['generate'] },
-  { name: 'other',                  type: 'boolean', description: 'Enable AGENTS.md instruction file', appliesTo: ['generate'] },
   { name: 'instructions-mode',      type: 'enum',    description: 'Instruction mode: safe|permissive|off', appliesTo: ['generate'], values: ['safe', 'permissive', 'off'], prop: 'instructionsMode' },
 ] as const;
 
@@ -95,15 +91,6 @@ export interface CliFlags {
 
   /** --kb: generate kb.md knowledge base file. */
   kb: boolean;
-
-  /** --copilot: enable Copilot instruction file. */
-  copilot: boolean;
-  /** --cursor: enable Cursor instruction file. */
-  cursor: boolean;
-  /** --claude: enable Claude instruction file. */
-  claude: boolean;
-  /** --other: enable AGENTS.md instruction file. */
-  other: boolean;
 
   /** --instructions-mode: instruction generation mode. */
   instructionsMode?: 'safe' | 'permissive' | 'off';

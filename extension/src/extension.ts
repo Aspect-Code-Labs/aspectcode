@@ -95,7 +95,7 @@ async function updateStatusBar(): Promise<void> {
     currentStatusBarState = 'uninitialized';
     statusBarItem.text = '$(beaker)';
     statusBarItem.tooltip = 'Aspect Code: Not configured — click to set up';
-    statusBarItem.command = 'aspectcode.configureAssistants';
+    statusBarItem.command = 'aspectcode.generate';
     statusBarItem.backgroundColor = undefined;
     statusBarItem.show();
     return;
@@ -163,7 +163,7 @@ async function maybeShowSetupPrompt(
   );
 
   if (action === 'Set Up') {
-    void vscode.commands.executeCommand('aspectcode.configureAssistants');
+    void vscode.commands.executeCommand('aspectcode.generate');
   } else if (action === 'Not for This Repo') {
     const updated = [...dismissedRepos, repoKey];
     await context.globalState.update(DISMISSED_REPOS_KEY, updated);

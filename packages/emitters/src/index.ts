@@ -16,7 +16,6 @@ export type {
   Emitter,
   EmitResult,
   EmitOptions,
-  AssistantFlags,
   InstructionsMode,
 } from './emitter';
 
@@ -75,12 +74,8 @@ export async function runEmitters(
     skipped.push({ id: 'kb', reason: 'KB generation not enabled (use --kb or set generateKb)' });
   }
 
-  // ── Instructions ─────────────────────────────────────
-  const assistants = opts.assistants ?? {};
-  const wantsAnyInstructions = Boolean(
-    assistants.copilot || assistants.cursor || assistants.claude || assistants.other,
-  );
-  if (wantsAnyInstructions) {
+  // ── Instructions (always emit AGENTS.md) ─────────────
+  {
     const { createInstructionsEmitter } = await import('./instructions/instructionsEmitter');
     const instructions = createInstructionsEmitter();
 
@@ -95,8 +90,6 @@ export async function runEmitters(
     };
 
     await instructions.emit(model, recordingHost, opts);
-  } else {
-    skipped.push({ id: 'instructions', reason: 'No assistants enabled' });
   }
 
   const stats = computeModelStats(model, 10);

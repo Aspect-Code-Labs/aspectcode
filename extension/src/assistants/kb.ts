@@ -71,7 +71,7 @@ async function preloadFileContents(files: string[]): Promise<Map<string, string>
  * This function:
  * 1. Checks if kb.md exists (skips if not and generateKb is off)
  * 2. Delegates to @aspectcode/emitters via generateKnowledgeBase
- * 3. Does NOT regenerate instruction files (those require configureAssistants)
+ * 3. Does NOT regenerate instruction files (those require the generate command)
  *
  * @returns Object with regenerated flag and discovered files (for markKbFresh)
  */
@@ -94,7 +94,7 @@ export async function regenerateEverything(
   const workspaceRoot = workspaceFolders[0].uri;
 
   // Check if kb.md already exists - don't auto-create
-  // Users must explicitly initialize via configureAssistants command
+  // Users must explicitly initialize via generate command
   const generateKb = await getGenerateKbSetting(workspaceRoot);
   if (!generateKb) {
     try {
@@ -103,7 +103,7 @@ export async function regenerateEverything(
     } catch {
       // kb.md doesn't exist and generateKb is off - skip regeneration
       outputChannel.appendLine(
-        '[KB] regenerateEverything: Skipped (kb.md not yet created and generateKb is off - run configureAssistants to initialize)',
+        '[KB] regenerateEverything: Skipped (kb.md not yet created and generateKb is off - run generate to initialize)',
       );
       return { regenerated: false, files: [] };
     }
@@ -261,7 +261,6 @@ async function generateKnowledgeBaseInProcess(
       fileContents: fileContentCache,
       generateKb: true,
       // KB-only from this entry point; instruction generation is handled elsewhere.
-      assistants: {},
       instructionsMode: 'off',
     });
 

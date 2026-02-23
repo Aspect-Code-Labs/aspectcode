@@ -49,10 +49,6 @@ export function parseArgs(argv: string[]): CliArgs {
     force: false,
     kbOnly: false,
     kb: false,
-    copilot: false,
-    cursor: false,
-    claude: false,
-    other: false,
     noColor: false,
   };
   const positionals: string[] = [];
@@ -151,7 +147,6 @@ ${fmt.bold('EXAMPLES')}
   aspectcode init
   aspectcode generate
   aspectcode generate --kb
-  aspectcode gen --copilot --cursor
   aspectcode g --json
   aspectcode impact --file src/app.ts
   aspectcode deps list --file src/app.ts
