@@ -150,12 +150,7 @@ function isManagedEntryLine(line: string): boolean {
   if (!trimmed) return true; // allow blank lines within the block
   const lower = trimmed.toLowerCase();
   // All entries we manage
-  return (
-    lower === 'kb.md' ||
-    lower === '/kb.md' ||
-    lower === 'agents.md' ||
-    lower === '/agents.md'
-  );
+  return lower === 'kb.md' || lower === '/kb.md' || lower === 'agents.md' || lower === '/agents.md';
 }
 
 function findAspectCodeBlockEnd(lines: string[], startIndex: number): number {

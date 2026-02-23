@@ -242,7 +242,9 @@ export class WorkspaceFingerprint implements vscode.Disposable {
       this.regenerationInProgress = true;
       const startTime = Date.now();
       this.outputChannel.appendLine(
-        `[WorkspaceFingerprint] Auto-regenerating KB (onChange trigger, file: ${path.basename(lastSavedFile)})...`,
+        `[WorkspaceFingerprint] Auto-regenerating KB (onChange trigger, file: ${path.basename(
+          lastSavedFile,
+        )})...`,
       );
 
       await this.kbRegenerateCallback!();

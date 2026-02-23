@@ -124,9 +124,7 @@ export function activateCommands(
       const now = Date.now();
       if (now - lastNotificationTime > NOTIFICATION_DEBOUNCE_MS) {
         lastNotificationTime = now;
-        channel.appendLine(
-          `[Watcher] Detected missing instruction files`,
-        );
+        channel.appendLine(`[Watcher] Detected missing instruction files`);
         const message = 'Aspect Code: AI instruction files were deleted.';
         const action = await vscode.window.showWarningMessage(
           message + ' Regenerate to restore AI assistant context.',
@@ -193,7 +191,9 @@ async function emitInstructionFilesOnlyViaEmitters(
   try {
     await vscode.workspace.fs.stat(vscode.Uri.joinPath(workspaceRoot, 'kb.md'));
     kbExists = true;
-  } catch { /* kb.md doesn't exist */ }
+  } catch {
+    /* kb.md doesn't exist */
+  }
 
   // ── Try CLI subprocess first ──────────────────────────────
   const cliResult = await cliGenerateWithInstructions(workspaceRoot.fsPath, {

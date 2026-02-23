@@ -152,7 +152,9 @@ export async function generateKnowledgeBase(
 
   if (cliResult.exitCode === 0 && cliResult.data) {
     outputChannel.appendLine(
-      `[KB] CLI generate succeeded: ${cliResult.data.wrote.length} files in ${Date.now() - kbStart}ms`,
+      `[KB] CLI generate succeeded: ${cliResult.data.wrote.length} files in ${
+        Date.now() - kbStart
+      }ms`,
     );
 
     // Prompt user for kb.md gitignore preference AFTER KB is generated.
@@ -215,7 +217,9 @@ async function generateKnowledgeBaseInProcess(
   const tCache = Date.now();
   const fileContentCache = await preloadFileContents(files);
   outputChannel.appendLine(
-    `[KB][Perf] preloadFileContents: ${fileContentCache.size} files cached in ${Date.now() - tCache}ms`,
+    `[KB][Perf] preloadFileContents: ${fileContentCache.size} files cached in ${
+      Date.now() - tCache
+    }ms`,
   );
 
   const generatedAt = new Date().toISOString();
@@ -242,7 +246,9 @@ async function generateKnowledgeBaseInProcess(
   );
   model.generatedAt = generatedAt;
   outputChannel.appendLine(
-    `[KB][Perf] analyzeRepoWithDependencies(shared): ${model.graph.edges.length} edges in ${Date.now() - tAnalyze}ms`,
+    `[KB][Perf] analyzeRepoWithDependencies(shared): ${model.graph.edges.length} edges in ${
+      Date.now() - tAnalyze
+    }ms`,
   );
 
   // Delegate artifact generation (KB + manifest) to @aspectcode/emitters.
@@ -272,9 +278,7 @@ async function generateKnowledgeBaseInProcess(
     throw writeErr;
   }
 
-  outputChannel.appendLine(
-    `[KB] Knowledge base generation complete in ${Date.now() - kbStart}ms`,
-  );
+  outputChannel.appendLine(`[KB] Knowledge base generation complete in ${Date.now() - kbStart}ms`);
 
   // Prompt user for kb.md gitignore preference AFTER KB is generated.
   // This runs async (non-blocking) so it doesn't hold up the rest of the flow.

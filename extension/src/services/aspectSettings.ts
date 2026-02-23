@@ -17,14 +17,9 @@ type UpdateRateMode = 'manual' | 'onChange' | 'idle';
 export type AutoRegenerateKbMode = UpdateRateMode | 'off' | 'onSave';
 
 // File paths that can be individually configured for gitignore
-export type GitignoreTarget =
-  | 'kb.md'
-  | 'AGENTS.md';
+export type GitignoreTarget = 'kb.md' | 'AGENTS.md';
 
-const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = [
-  'kb.md',
-  'AGENTS.md',
-];
+const ALL_GITIGNORE_TARGETS: GitignoreTarget[] = ['kb.md', 'AGENTS.md'];
 
 /**
  * Schema for aspectcode.json
@@ -293,9 +288,7 @@ export async function getInstructionsModeSetting(
   return settings.instructionsMode ?? 'safe';
 }
 
-export async function getGenerateKbSetting(
-  workspaceRoot: vscode.Uri,
-): Promise<boolean> {
+export async function getGenerateKbSetting(workspaceRoot: vscode.Uri): Promise<boolean> {
   const settings = await readAspectSettings(workspaceRoot);
   return settings.generateKb === true;
 }
@@ -332,7 +325,6 @@ export async function setExtensionEnabledSetting(
 ): Promise<void> {
   await updateAspectSettings(workspaceRoot, { extensionEnabled: enabled }, options);
 }
-
 
 /**
  * Get the gitignore preference for a specific target
