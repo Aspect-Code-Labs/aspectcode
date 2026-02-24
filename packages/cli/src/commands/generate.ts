@@ -13,6 +13,7 @@ import {
   runEmitters,
 } from '@aspectcode/emitters';
 import type { EmitOptions } from '@aspectcode/emitters';
+import type { EmitOptions } from '@aspectcode/emitters';
 import type { CommandContext, CommandResult } from '../cli';
 import { ExitCode } from '../cli';
 import { fmt, createSpinner } from '../logger';
@@ -24,11 +25,10 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
   const startMs = Date.now();
 
   // ── 1. Resolve options ────────────────────────────────────
-  const outDir = flags.out ?? config?.outDir ?? undefined;
-  const resolvedOut = outDir ? path.resolve(root, outDir) : root;
+  const resolvedOut = flags.out ? path.resolve(root, flags.out) : root;
   if (!flags.json) {
     log.info(`Workspace: ${fmt.cyan(root)}`);
-    if (outDir) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
+    if (flags.out) log.info(`Output:    ${fmt.cyan(resolvedOut)}`);
     log.blank();
   }
 
@@ -61,6 +61,9 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
     ? 'off'
     : (flags.instructionsMode ?? 'safe');
 
+  // KB generation: explicit --kb flag, --kb-only, or config setting
+  const generateKb = flags.kb || flags.kbOnly || config?.generateKb || false;
+
   if (!flags.kbOnly && !flags.json) {
     log.info(`Instructions: ${fmt.cyan('AGENTS.md')} (mode: ${instructionsMode})`);
   }
@@ -72,6 +75,7 @@ export async function runGenerate(ctx: CommandContext): Promise<CommandResult> {
     workspaceRoot: root,
     outDir: resolvedOut,
     instructionsMode,
+    generateKb,
     fileContents,
   };
 

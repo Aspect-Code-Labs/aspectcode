@@ -76,23 +76,21 @@ describe('runEmitters', () => {
       outDir,
       generatedAt: FIXED_TIMESTAMP,
       fileContents,
+      generateKb: true,
       instructionsMode: 'safe',
     });
 
     assert.equal(report.schemaVersion, '0.1');
     assert.ok(report.wrote.length > 0);
 
-    // KB + manifest should be written under outDir
-    assert.ok(fs.existsSync(path.join(outDir, '.aspect', 'architecture.md')));
-    assert.ok(fs.existsSync(path.join(outDir, '.aspect', 'map.md')));
-    assert.ok(fs.existsSync(path.join(outDir, '.aspect', 'context.md')));
-    assert.ok(fs.existsSync(path.join(outDir, '.aspect', 'manifest.json')));
+    // KB should be written as a single kb.md under outDir
+    assert.ok(fs.existsSync(path.join(outDir, 'kb.md')));
 
     // AGENTS.md should land under outDir
     assert.ok(fs.existsSync(path.join(outDir, 'AGENTS.md')));
 
     // Ensure we did not implicitly write into workspaceRoot
-    assert.ok(!fs.existsSync(path.join(workspaceDir, '.aspect', 'manifest.json')));
+    assert.ok(!fs.existsSync(path.join(workspaceDir, 'kb.md')));
   });
 
   it('does not partially overwrite outputs when a staged write fails', async () => {
@@ -102,17 +100,16 @@ describe('runEmitters', () => {
     const baseHost = createNodeEmitterHost();
 
     // Existing output that must remain intact on failure
-    const archPath = path.join(outDir, '.aspect', 'architecture.md');
-    await baseHost.writeFile(archPath, 'OLD ARCH\n');
+    const kbPath = path.join(outDir, 'kb.md');
+    await baseHost.writeFile(kbPath, 'OLD KB\n');
 
     const { model, fileContents } = makeModel(workspaceDir);
 
-    const mapTempPrefix = `${path.join(outDir, '.aspect', 'map.md')}.__aspect_tmp__`;
-
+    // Fail when writing KB temp file (KB uses transaction with temp files)
     const failingHost = {
       ...baseHost,
       writeFile: async (filePath: string, content: string) => {
-        if (filePath.startsWith(mapTempPrefix)) {
+        if (filePath.includes('kb.md') && filePath.includes('__aspect_tmp__')) {
           throw new Error('Simulated write failure');
         }
         return baseHost.writeFile(filePath, content);
@@ -126,6 +123,7 @@ describe('runEmitters', () => {
         outDir,
         generatedAt: FIXED_TIMESTAMP,
         fileContents,
+        generateKb: true,
         instructionsMode: 'safe',
       });
     } catch {
@@ -133,8 +131,7 @@ describe('runEmitters', () => {
     }
 
     assert.ok(threw, 'Expected runEmitters to throw');
-    assert.equal(fs.readFileSync(archPath, 'utf8'), 'OLD ARCH\n', 'Existing output must not be overwritten');
-    assert.ok(!fs.existsSync(path.join(outDir, '.aspect', 'manifest.json')), 'Manifest should not be written');
+    assert.equal(fs.readFileSync(kbPath, 'utf8'), 'OLD KB\n', 'Existing output must not be overwritten');
   });
 
   it('supports relative fileContents keys (CLI-compatible)', async () => {
@@ -149,13 +146,14 @@ describe('runEmitters', () => {
       outDir,
       generatedAt: FIXED_TIMESTAMP,
       fileContents,
+      generateKb: true,
       instructionsMode: 'safe',
     });
 
-    const mapPath = path.join(outDir, '.aspect', 'map.md');
-    const mapContent = fs.readFileSync(mapPath, 'utf8');
+    const kbPath = path.join(outDir, 'kb.md');
+    const kbContent = fs.readFileSync(kbPath, 'utf8');
 
-    assert.ok(mapContent.includes('`main`'), 'Expected symbol index to include main function');
-    assert.ok(mapContent.includes('`format`'), 'Expected symbol index to include format function');
+    assert.ok(kbContent.includes('`main`'), 'Expected symbol index to include main function');
+    assert.ok(kbContent.includes('`format`'), 'Expected symbol index to include format function');
   });
 });

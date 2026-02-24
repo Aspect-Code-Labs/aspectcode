@@ -15,7 +15,6 @@ const IDLE_DEBOUNCE_MS = 30000;
 const IGNORED_SEGMENTS = [
   '/node_modules/',
   '/.git/',
-  '/.aspect/',
   '/dist/',
   '/build/',
   '/target/',

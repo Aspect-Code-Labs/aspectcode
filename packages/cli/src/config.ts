@@ -2,7 +2,6 @@
  * aspectcode CLI — config file handling.
  *
  * The CLI looks for `aspectcode.json` in the workspace root.
- * This replaces the extension's `.aspect/.settings.json`.
  */
 
 import * as fs from 'fs';
@@ -12,9 +11,6 @@ export const CONFIG_FILE_NAME = 'aspectcode.json';
 
 /** Shape of `aspectcode.json`. */
 export interface AspectCodeConfig {
-  /** Override output directory (relative to workspace root). */
-  outDir?: string;
-
   /** Instructions mode (safe-only for now). */
   instructionsMode?: 'safe';
 

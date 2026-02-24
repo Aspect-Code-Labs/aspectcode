@@ -7,19 +7,6 @@ import {
 } from './content';
 import { mergeAspectCodeSection, removeAspectCodeSection } from './merge';
 
-async function readCustomInstructionsContent(
-  host: EmitterHost,
-  outDir: string,
-): Promise<string | null> {
-  const filePath = host.join(outDir, '.aspect', 'instructions.md');
-  try {
-    const text = await host.readFile(filePath);
-    return text.trim();
-  } catch {
-    return null;
-  }
-}
-
 async function readIfExists(host: EmitterHost, filePath: string): Promise<{ exists: boolean; text: string }> {
   try {
     const text = await host.readFile(filePath);

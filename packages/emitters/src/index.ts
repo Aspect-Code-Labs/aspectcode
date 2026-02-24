@@ -23,8 +23,7 @@ export type { EmitReport } from './report';
 
 // ── Manifest ─────────────────────────────────────────────────
 
-export type { Manifest, ManifestStats } from './manifest';
-
+export type { Manifest, ManifestStats } from './manifest';export { buildManifest } from './manifest';
 // ── KB helpers ───────────────────────────────────────────────
 
 export * from './kb';
@@ -60,19 +59,20 @@ export async function runEmitters(
   const wrote: Array<{ path: string; bytes: number }> = [];
   const skipped: Array<{ id: string; reason: string }> = [];
 
-  // ── KB + manifest transaction (manifest written last) ─────
-  const tx = new GenerationTransaction(host);
-  const txHost = tx.host;
+  // ── KB generation (opt-in) ────────────────────────────
+  if (opts.generateKb) {
+    const tx = new GenerationTransaction(host);
+    const txHost = tx.host;
 
-  const { createKBEmitter } = await import('./kb/kbEmitter');
-  const kb = createKBEmitter();
-  await kb.emit(model, txHost, opts);
+    const { createKBEmitter } = await import('./kb/kbEmitter');
+    const kb = createKBEmitter();
+    await kb.emit(model, txHost, opts);
 
-  const { writeManifest: writeM } = await import('./manifest');
-  await writeM(model, txHost, outDir, _generatedAt);
-
-  await tx.commit();
-  wrote.push(...tx.getWrites().map((w) => ({ path: w.finalPath, bytes: w.bytes })));
+    await tx.commit();
+    wrote.push(...tx.getWrites().map((w) => ({ path: w.finalPath, bytes: w.bytes })));
+  } else {
+    skipped.push({ id: 'kb', reason: 'KB generation not enabled (use --kb or set generateKb)' });
+  }
 
   // ── Instructions (outside the .aspect transaction) ─────────
   if (opts.instructionsMode !== 'off') {

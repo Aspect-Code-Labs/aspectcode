@@ -13,17 +13,14 @@ import type { CommandContext } from './cli';
 import { loadConfig } from './config';
 import { createLogger, disableColor, fmt } from './logger';
 import { getVersion } from './version';
-import { runInit } from './commands/init';
 import { runGenerate } from './commands/generate';
-import { runDepsList } from './commands/deps';
+import { runDepsList, runDepsImpact } from './commands/deps';
 import { runWatch } from './commands/watch';
 import { runImpact } from './commands/impact';
 import { runOptimize } from './commands/optimize';
 import {
   runAddExclude,
-  runClearOutDir,
   runRemoveExclude,
-  runSetOutDir,
   runSetUpdateRate,
   runShowConfig,
 } from './commands/settings';
@@ -47,7 +44,6 @@ export function parseArgs(argv: string[]): CliArgs {
     quiet: false,
     listConnections: false,
     json: false,
-    force: false,
     kbOnly: false,
     noColor: false,
     dryRun: false,
@@ -130,16 +126,12 @@ ${fmt.bold('USAGE')}
   aspectcode <command> [options]
 
 ${fmt.bold('COMMANDS')}
-  init                     Create an ${fmt.cyan('aspectcode.json')} config file
   generate  ${fmt.dim('(gen, g)')}       Discover, analyze, and emit KB artifacts
   watch                    Watch source files and regenerate on changes
-  impact                   Compute impact analysis for a file
   deps list                List dependency connections
   optimize  ${fmt.dim('(opt)')}        Optimize AGENTS.md instructions via LLM
   show-config              Show current ${fmt.cyan('aspectcode.json')} values
   set-update-rate <mode>   Set updateRate to manual|onChange|idle
-  set-out-dir <path>       Set outDir
-  clear-out-dir            Remove outDir
   add-exclude <path>       Add an exclude path
   remove-exclude <path>    Remove an exclude path
 
@@ -147,7 +139,6 @@ ${fmt.bold('OPTIONS')}
 ${optionLines.join('\n')}
 
 ${fmt.bold('EXAMPLES')}
-  aspectcode init
   aspectcode generate
   aspectcode gen --kb-only
   aspectcode g --json
@@ -206,10 +197,6 @@ async function main(): Promise<void> {
   let result: CommandResult;
 
   switch (command) {
-    case 'init':
-      result = await runInit(ctx);
-      break;
-
     case 'generate':
     case 'gen':
     case 'g':
@@ -218,12 +205,14 @@ async function main(): Promise<void> {
 
     case 'deps': {
       const sub = parsed.positionals[0] ?? 'list';
-      if (sub !== 'list') {
+      if (sub === 'list') {
+        result = await runDepsList(ctx);
+      } else if (sub === 'impact') {
+        result = await runDepsImpact(ctx);
+      } else {
         log.error(`Unknown deps subcommand: ${fmt.bold(sub)}`);
         result = { exitCode: ExitCode.USAGE };
-        break;
       }
-      result = await runDepsList(ctx);
       break;
     }
 
@@ -277,16 +266,6 @@ async function main(): Promise<void> {
       result = await runSetUpdateRate(ctx, value);
       break;
     }
-
-    case 'set-out-dir': {
-      const value = parsed.positionals[0] ?? '';
-      result = await runSetOutDir(ctx, value);
-      break;
-    }
-
-    case 'clear-out-dir':
-      result = await runClearOutDir(ctx);
-      break;
 
     case 'add-exclude': {
       const value = parsed.positionals[0] ?? '';

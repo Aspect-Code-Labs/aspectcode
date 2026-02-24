@@ -2,7 +2,7 @@
 
 **Knowledge Base Generator for AI Coding Assistants**
 
-Aspect Code generates a structured knowledge base (`.aspect/`) that helps AI coding assistants understand your codebase architecture before making changes.
+Aspect Code generates a knowledge base (`kb.md`) and instruction files that help AI coding assistants understand your codebase architecture before making changes.
 
 ---
 
@@ -34,10 +34,7 @@ Python, TypeScript, JavaScript, Java, C#
 
 | File | Purpose |
 |------|---------|
-| `.aspect/architecture.md` | High-risk hubs, directory layout, entry points |
-| `.aspect/map.md` | Data models, symbol index, naming conventions |
-| `.aspect/context.md` | Module clusters, external integrations, data flows |
-
+| `kb.md` | Architecture, data models, module clusters, integrations || `AGENTS.md` | AI assistant instruction file with coding rules |
 ---
 
 ## Instruction Modes

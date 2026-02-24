@@ -17,6 +17,7 @@ import { AspectCodeState } from '../state';
 import { loadGrammarsOnce, type LoadedGrammars } from '../tsParser';
 import { ensureGitignoreForTarget } from '../services/gitignoreService';
 import type { GitignoreTarget } from '../services/aspectSettings';
+import { getGenerateKbSetting } from '../services/aspectSettings';
 import { discoverSourceFiles } from '../services/DirectoryExclusion';
 import { getFileDiscoveryService } from '../services/FileDiscoveryService';
 import { createVsCodeEmitterHost } from '../services/vscodeEmitterHost';
@@ -121,7 +122,7 @@ export async function regenerateEverything(
 }
 
 /**
- * Generates the .aspect/ knowledge base directory.
+ * Generates the kb.md knowledge base file at the workspace root.
  *
  * Strategy: try the CLI subprocess first (`aspectcode generate --json --kb-only`).
  * If the CLI is unavailable (not installed / not built), fall back to in-process
@@ -137,18 +138,8 @@ export async function generateKnowledgeBase(
 ): Promise<string[]> {
   outputChannel.appendLine('[KB] generateKnowledgeBase called');
 
-  const aspectCodeDir = vscode.Uri.joinPath(workspaceRoot, '.aspect');
-
-  // Ensure .aspect directory exists
-  try {
-    await vscode.workspace.fs.createDirectory(aspectCodeDir);
-    outputChannel.appendLine('[KB] .aspect directory created/confirmed');
-  } catch (e) {
-    outputChannel.appendLine(`[KB] .aspect directory create result: ${e}`);
-  }
-
   const kbStart = Date.now();
-  outputChannel.appendLine('[KB] Generating knowledge base in .aspect/');
+  outputChannel.appendLine('[KB] Generating knowledge base (kb.md)');
 
   // ── Try CLI subprocess first ──────────────────────────────
   const cliResult = await cliGenerate(workspaceRoot.fsPath, {
@@ -158,12 +149,14 @@ export async function generateKnowledgeBase(
 
   if (cliResult.exitCode === 0 && cliResult.data) {
     outputChannel.appendLine(
-      `[KB] CLI generate succeeded: ${cliResult.data.wrote.length} files in ${Date.now() - kbStart}ms`,
+      `[KB] CLI generate succeeded: ${cliResult.data.wrote.length} files in ${
+        Date.now() - kbStart
+      }ms`,
     );
 
-    // Prompt user for .aspect/ gitignore preference AFTER KB is generated.
-    const aspectTarget: GitignoreTarget = '.aspect/';
-    void ensureGitignoreForTarget(workspaceRoot, aspectTarget, outputChannel).catch((e) => {
+    // Prompt user for kb.md gitignore preference AFTER KB is generated.
+    const kbTarget: GitignoreTarget = 'kb.md';
+    void ensureGitignoreForTarget(workspaceRoot, kbTarget, outputChannel).catch((e) => {
       outputChannel.appendLine(`[KB] Gitignore prompt failed (non-critical): ${e}`);
     });
 
@@ -221,7 +214,9 @@ async function generateKnowledgeBaseInProcess(
   const tCache = Date.now();
   const fileContentCache = await preloadFileContents(files);
   outputChannel.appendLine(
-    `[KB][Perf] preloadFileContents: ${fileContentCache.size} files cached in ${Date.now() - tCache}ms`,
+    `[KB][Perf] preloadFileContents: ${fileContentCache.size} files cached in ${
+      Date.now() - tCache
+    }ms`,
   );
 
   const generatedAt = new Date().toISOString();
@@ -248,12 +243,13 @@ async function generateKnowledgeBaseInProcess(
   );
   model.generatedAt = generatedAt;
   outputChannel.appendLine(
-    `[KB][Perf] analyzeRepoWithDependencies(shared): ${model.graph.edges.length} edges in ${Date.now() - tAnalyze}ms`,
+    `[KB][Perf] analyzeRepoWithDependencies(shared): ${model.graph.edges.length} edges in ${
+      Date.now() - tAnalyze
+    }ms`,
   );
 
   // Delegate artifact generation (KB + manifest) to @aspectcode/emitters.
-  // This keeps the extension as a thin wrapper, with deterministic output and
-  // transaction-style staging (manifest written last).
+  // This keeps the extension as a thin wrapper, with deterministic output.
   const tWrite = Date.now();
   outputChannel.appendLine(
     `[KB] Starting emitter generation: outDir=${workspaceRoot.fsPath}, files=${files.length}`,
@@ -278,14 +274,12 @@ async function generateKnowledgeBaseInProcess(
     throw writeErr;
   }
 
-  outputChannel.appendLine(
-    `[KB] Knowledge base generation complete (KB + manifest) in ${Date.now() - kbStart}ms`,
-  );
+  outputChannel.appendLine(`[KB] Knowledge base generation complete in ${Date.now() - kbStart}ms`);
 
-  // Prompt user for .aspect/ gitignore preference AFTER KB is generated.
+  // Prompt user for kb.md gitignore preference AFTER KB is generated.
   // This runs async (non-blocking) so it doesn't hold up the rest of the flow.
-  const aspectTarget: GitignoreTarget = '.aspect/';
-  void ensureGitignoreForTarget(workspaceRoot, aspectTarget, outputChannel).catch((e) => {
+  const kbTarget: GitignoreTarget = 'kb.md';
+  void ensureGitignoreForTarget(workspaceRoot, kbTarget, outputChannel).catch((e) => {
     outputChannel.appendLine(`[KB] Gitignore prompt failed (non-critical): ${e}`);
   });
 

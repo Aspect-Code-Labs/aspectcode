@@ -39,9 +39,8 @@ export const FLAG_DEFS: readonly FlagDef[] = [
   { name: 'root',       short: 'r', type: 'string',  description: 'Workspace root (default: cwd)',     appliesTo: 'global' },
   { name: 'out',        short: 'o', type: 'string',  description: 'Output directory override',         appliesTo: ['generate'] },
   { name: 'json',                   type: 'boolean', description: 'Print JSON output (for automation)', appliesTo: 'global' },
-  { name: 'force',      short: 'f', type: 'boolean', description: 'Overwrite existing config (init)',  appliesTo: ['init'] },
   { name: 'no-color',               type: 'boolean', description: 'Disable colored output',            appliesTo: 'global', prop: 'noColor' },
-  { name: 'file',                   type: 'string',  description: 'Filter by file path',               appliesTo: ['generate', 'impact', 'deps'] },
+  { name: 'file',                   type: 'string',  description: 'Filter by file path',               appliesTo: ['generate', 'deps'] },
   { name: 'list-connections',       type: 'boolean', description: 'Print dependency connections',      appliesTo: ['generate'], prop: 'listConnections' },
   { name: 'mode',                   type: 'enum',    description: 'Watch mode: manual|onChange|idle',   appliesTo: ['watch'], values: ['manual', 'onChange', 'idle'] },
   { name: 'kb-only',                type: 'boolean', description: 'Generate KB artifacts only (skip instruction files)', appliesTo: ['generate'], prop: 'kbOnly' },
@@ -85,9 +84,6 @@ export interface CliFlags {
 
   /** --file <path>: filter dependency output to one workspace file. */
   file?: string;
-
-  /** --force / -f : overwrite existing config during init. */
-  force: boolean;
 
   /** --mode: watch mode override. */
   mode?: 'manual' | 'onChange' | 'idle';
