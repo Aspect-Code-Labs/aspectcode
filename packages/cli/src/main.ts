@@ -8,9 +8,12 @@
 import * as path from 'path';
 import type { CliFlags } from './cli';
 import { ExitCode, FLAG_DEFS, flagPropName } from './cli';
-import { createLogger, disableColor, fmt } from './logger';
+import type { SpinnerFactory } from './cli';
+import { createLogger, createSpinner, disableColor, fmt } from './logger';
 import { getVersion } from './version';
 import { runPipeline } from './pipeline';
+import { createDashboardLogger, createDashboardSpinner } from './ui/inkLogger';
+import type { PipelinePhase } from './ui/store';
 
 // ── Build lookup tables from FLAG_DEFS ───────────────────────
 
@@ -148,10 +151,41 @@ async function main(): Promise<void> {
     flags.temperature = parseFloatFlag(flags.temperature, 0, 2);
   }
 
-  const log = createLogger({ verbose: flags.verbose, quiet: flags.quiet });
   const root = path.resolve(flags.root ?? process.cwd());
+  const useDashboard = !flags.quiet && !flags.noColor && process.stdout.isTTY === true;
 
-  process.exitCode = await runPipeline({ root, flags, log });
+  let log;
+  let spin: SpinnerFactory;
+  let unmount: (() => void) | undefined;
+
+  if (useDashboard) {
+    // ink-based dashboard mode
+    log = createDashboardLogger();
+    spin = (msg: string, phase?: string) =>
+      createDashboardSpinner((phase ?? 'idle') as PipelinePhase, msg);
+
+    try {
+      const { render } = await import('ink');
+      const React = await import('react');
+      const Dashboard = (await import('./ui/Dashboard')).default;
+      const instance = render(React.createElement(Dashboard));
+      unmount = () => instance.unmount();
+    } catch {
+      // If ink rendering fails, fall back gracefully
+      log = createLogger({ verbose: flags.verbose, quiet: flags.quiet });
+      spin = (msg: string) => createSpinner(msg, { quiet: flags.quiet });
+      unmount = undefined;
+    }
+  } else {
+    log = createLogger({ verbose: flags.verbose, quiet: flags.quiet });
+    spin = (msg: string) => createSpinner(msg, { quiet: flags.quiet });
+  }
+
+  try {
+    process.exitCode = await runPipeline({ root, flags, log, spin });
+  } finally {
+    if (unmount) unmount();
+  }
 }
 
 /** Entry point — called from bin/aspectcode.js. */

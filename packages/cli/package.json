@@ -46,18 +46,21 @@
     "@aspectcode/optimizer"
   ],
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@aspectcode/core": "0.3.1",
     "@aspectcode/emitters": "0.3.1",
     "@aspectcode/optimizer": "0.3.1",
-    "@anthropic-ai/sdk": "^0.39.0",
     "chokidar": "^4.0.3",
     "dotenv": "^16.4.0",
+    "ink": "3.2.0",
     "openai": "^4.70.0",
+    "react": "17.0.2",
     "web-tree-sitter": "^0.21.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.0",
     "@types/node": "^22.0.0",
+    "@types/react": "17.0.91",
     "mocha": "^10.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"

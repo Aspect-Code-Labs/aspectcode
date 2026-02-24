@@ -11,7 +11,7 @@
 import type { ChatMessage, LlmProvider, ProviderOptions } from '../types';
 import { withRetry } from './retry';
 
-const DEFAULT_MODEL = 'gpt-4o';
+const DEFAULT_MODEL = 'gpt-4o-mini';
 const DEFAULT_TEMPERATURE = 0.4;
 const DEFAULT_MAX_TOKENS = 4096;
 

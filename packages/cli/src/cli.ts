@@ -4,7 +4,10 @@
  * Ultra-simple: one command (`aspectcode`), minimal flags, auto-everything.
  */
 
-import type { Logger } from './logger';
+import type { Logger, Spinner } from './logger';
+
+/** Factory to create a spinner — allows dashboard to intercept. */
+export type SpinnerFactory = (msg: string, phase?: string) => Spinner;
 
 // ── Flag definitions (single source of truth) ───────────────
 
@@ -85,6 +88,8 @@ export interface RunContext {
   flags: CliFlags;
   /** Logger respecting --verbose / --quiet. */
   log: Logger;
+  /** Spinner factory (dashboard-aware or plain). */
+  spin: SpinnerFactory;
 }
 
 // ── Flag-def helpers ─────────────────────────────────────────

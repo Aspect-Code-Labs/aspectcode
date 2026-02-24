@@ -176,3 +176,68 @@ export function parseEvalResponse(response: string): {
 
   return { score, feedback, suggestions };
 }
+
+// ── Complaint-driven prompts ─────────────────────────────────
+
+/**
+ * Build a prompt that instructs the LLM to address specific user complaints
+ * by modifying the AGENTS.md instructions.
+ */
+export function buildComplaintPrompt(
+  currentInstructions: string,
+  complaints: string[],
+): string {
+  const numbered = complaints.map((c, i) => `${i + 1}. ${c}`).join('\n');
+
+  return `You are updating AGENTS.md instructions to address user complaints about
+AI coding assistant behaviour. Each complaint describes something the AI did
+wrong or forgot. Your job is to add, modify, or strengthen rules so the
+described problem will not happen again.
+
+## Complaints
+${numbered}
+
+## Current Instructions
+${currentInstructions}
+
+## Rules
+- Address EVERY complaint. For each one, add or modify a specific, actionable rule.
+- Do NOT remove existing rules unless they directly contradict a fix.
+- Keep instructions concise — each new rule should be one or two lines.
+- Output the FULL updated instructions (not just the diff).
+
+Respond in EXACTLY this format:
+
+CHANGES:
+- <short description of change 1>
+- <short description of change 2>
+...
+
+INSTRUCTIONS:
+<full updated instructions content>`;
+}
+
+/**
+ * Parse a complaint response into changes + updated instructions.
+ */
+export function parseComplaintResponse(response: string): {
+  changes: string[];
+  instructions: string;
+} {
+  const changes: string[] = [];
+
+  const changesMatch = response.match(/CHANGES:\s*([\s\S]*?)(?=\nINSTRUCTIONS:)/i);
+  if (changesMatch) {
+    for (const line of changesMatch[1].split('\n')) {
+      const trimmed = line.replace(/^[-*]\s*/, '').trim();
+      if (trimmed) changes.push(trimmed);
+    }
+  }
+
+  const instructionsMatch = response.match(/INSTRUCTIONS:\s*([\s\S]*)/i);
+  const instructions = instructionsMatch
+    ? instructionsMatch[1].trim()
+    : response.trim(); // fallback: treat entire response as instructions
+
+  return { changes, instructions };
+}

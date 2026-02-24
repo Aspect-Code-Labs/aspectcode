@@ -15,6 +15,9 @@ export interface AspectCodeConfig {
   /** Extra directories to exclude from analysis. */
   exclude?: string[];
 
+  /** AGENTS.md ownership: 'full' overwrites the file, 'section' uses markers. */
+  ownership?: 'full' | 'section';
+
   /** Optimization settings. */
   optimize?: {
     provider?: string;
@@ -40,4 +43,22 @@ export function loadConfig(root: string): AspectCodeConfig | undefined {
   } catch {
     throw new Error(`Failed to parse ${CONFIG_FILE_NAME}: invalid JSON`);
   }
+}
+
+/**
+ * Save a partial config update to `aspectcode.json`.
+ * Merges with any existing config. Creates the file if it doesn't exist.
+ */
+export function saveConfig(root: string, update: Partial<AspectCodeConfig>): void {
+  const configPath = path.join(root, CONFIG_FILE_NAME);
+  let existing: AspectCodeConfig = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as AspectCodeConfig;
+    } catch {
+      // Overwrite malformed config
+    }
+  }
+  const merged = { ...existing, ...update };
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2) + '\n');
 }

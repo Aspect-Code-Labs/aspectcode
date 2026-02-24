@@ -14,6 +14,7 @@ import {
 } from '@aspectcode/core';
 import type { AspectCodeConfig } from './config';
 import type { Logger } from './logger';
+import type { SpinnerFactory } from './cli';
 import { createSpinner } from './logger';
 
 export interface WorkspaceFiles {
@@ -42,11 +43,12 @@ export async function loadWorkspaceFiles(
   root: string,
   config: AspectCodeConfig | undefined,
   log: Logger,
-  opts?: { quiet?: boolean },
+  opts?: { quiet?: boolean; spin?: SpinnerFactory },
 ): Promise<WorkspaceFiles> {
   const exclude = config?.exclude;
+  const makeSpin = opts?.spin ?? ((msg: string) => createSpinner(msg, { quiet: opts?.quiet }));
 
-  const spin = createSpinner('Discovering files…', { quiet: opts?.quiet });
+  const spin = makeSpin('Discovering files…', 'discovering');
   const discoveredPaths = await discoverFiles(root, exclude ? { exclude } : undefined);
   if (discoveredPaths.length === 0) {
     spin.stop('No files found');
@@ -59,7 +61,7 @@ export async function loadWorkspaceFiles(
   }
   spin.stop(`Discovered ${discoveredPaths.length} files`);
 
-  const spinRead = createSpinner(`Reading ${discoveredPaths.length} files…`, { quiet: opts?.quiet });
+  const spinRead = makeSpin(`Reading ${discoveredPaths.length} files…`, 'discovering');
   const relativeFiles = new Map<string, string>();
   const absoluteFiles = new Map<string, string>();
   for (const abs of discoveredPaths) {

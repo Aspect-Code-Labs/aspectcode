@@ -16,13 +16,18 @@ import { createNodeEmitterHost } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import { ExitCode } from './cli';
 import type { ExitCodeValue } from './cli';
-import { loadConfig } from './config';
-import { fmt, createSpinner } from './logger';
+import { loadConfig, saveConfig } from './config';
+import type { AspectCodeConfig } from './config';
+import { fmt } from './logger';
 import { loadWorkspaceFiles } from './workspace';
 import { buildKbContent } from './kbBuilder';
 import { readToolInstructions } from './toolIngestion';
-import { writeAgentsMd, writeKbMd } from './writer';
+import { writeAgentsMd, writeKbMd, hasMarkers } from './writer';
+import type { OwnershipMode } from './writer';
 import { tryOptimize } from './optimize';
+import { processComplaints } from './complaintProcessor';
+import { selectPrompt } from './ui/prompts';
+import { store } from './ui/store';
 
 // ── Watch constants ──────────────────────────────────────────
 
@@ -44,22 +49,32 @@ function isSupportedSourceFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.includes(ext);
 }
 
+// ── Single pipeline run result ───────────────────────────────
+
+interface RunOnceResult {
+  code: ExitCodeValue;
+  /** KB content from this run (used by complaint processor). */
+  kbContent: string;
+}
+
 // ── Single pipeline run ──────────────────────────────────────
 
-async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
+async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
   const startMs = Date.now();
+  store.resetRun();
 
   // ── 1. Discover & read files ──────────────────────────────
-  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet });
+  store.setPhase('discovering');
+  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet, spin: ctx.spin });
   if (workspace.discoveredPaths.length === 0) {
     log.warn('No source files found. Check your workspace or exclude patterns.');
-    return ExitCode.ERROR;
+    return { code: ExitCode.ERROR, kbContent: '' };
   }
 
   // ── 2. Analyze ────────────────────────────────────────────
-  const spinAnalyze = createSpinner('Analyzing…', { quiet: flags.quiet });
+  const spinAnalyze = ctx.spin('Analyzing…', 'analyzing');
   const model = await analyzeRepoWithDependencies(
     root,
     workspace.relativeFiles,
@@ -69,9 +84,10 @@ async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
   spinAnalyze.stop(
     `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
   );
+  store.setStats(model.files.length, model.graph.edges.length);
 
   // ── 3. Build KB content in memory ─────────────────────────
-  const spinKb = createSpinner('Building knowledge base…', { quiet: flags.quiet });
+  const spinKb = ctx.spin('Building knowledge base…', 'building-kb');
   const kbContent = buildKbContent(model, root, workspace.relativeFiles);
   spinKb.stop('Knowledge base built');
 
@@ -83,29 +99,36 @@ async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
   }
 
   // ── 5. Optimize or fallback ───────────────────────────────
-  const agentsContent = await tryOptimize(ctx, kbContent, toolInstructions, config);
+  store.setPhase('optimizing');
+  const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config);
 
   // ── 6. Write AGENTS.md ────────────────────────────────────
+  store.setPhase('writing');
   if (flags.dryRun) {
     log.info(fmt.bold('Dry run — proposed AGENTS.md:'));
     log.blank();
-    console.log(agentsContent);
+    console.log(optimizeResult.content);
     log.blank();
   } else {
-    await writeAgentsMd(host, root, agentsContent);
-    const agentsPath = path.relative(root, path.join(root, 'AGENTS.md')).replace(/\\/g, '/');
-    log.success(`${agentsPath} written`);
+    await writeAgentsMd(host, root, optimizeResult.content, ownership);
+    const modeLabel = ownership === 'section' ? ' (section)' : '';
+    const verb = optimizeResult.reasoning.length > 0 ? 'updated' : 'written';
+    store.addOutput(`AGENTS.md ${verb}${modeLabel}`);
+    log.success(`AGENTS.md ${verb}${modeLabel}`);
   }
 
   // ── 7. Optionally write kb.md ─────────────────────────────
   if (flags.kb && !flags.dryRun) {
     await writeKbMd(host, root, kbContent);
+    store.addOutput('kb.md written');
     log.success('kb.md written');
   }
 
   const elapsedMs = Date.now() - startMs;
+  store.setElapsed(`${(elapsedMs / 1000).toFixed(1)}s`);
+  store.setPhase('done');
   log.info(fmt.dim(`Done in ${(elapsedMs / 1000).toFixed(1)}s`));
-  return ExitCode.OK;
+  return { code: ExitCode.OK, kbContent };
 }
 
 // ── Pipeline entry point ─────────────────────────────────────
@@ -116,16 +139,55 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
 
-  // ── Initial run ──────────────────────────────────────────
-  const code = await runOnce(ctx);
-  if (code !== ExitCode.OK) return code;
+  // ── Resolve AGENTS.md ownership mode ─────────────────────
+  const config: AspectCodeConfig | undefined = loadConfig(root);
+  let ownership: OwnershipMode = config?.ownership ?? 'full';
 
-  // ── --once: exit immediately ──────────────────────────────
-  if (flags.once) return ExitCode.OK;
+  // If AGENTS.md exists and we haven't stored a preference yet, ask
+  if (!config?.ownership) {
+    try {
+      const fs = await import('fs');
+      const agentsPath = path.join(root, 'AGENTS.md');
+      if (fs.existsSync(agentsPath)) {
+        const existing = fs.readFileSync(agentsPath, 'utf-8');
+        if (!hasMarkers(existing)) {
+          const idx = await selectPrompt(
+            'AGENTS.md already exists. How should AspectCode manage it?',
+            ['Replace entire file (full ownership)', 'Own a section (preserve your content)'],
+            0,
+          );
+          ownership = idx === 1 ? 'section' : 'full';
+          saveConfig(root, { ownership });
+          log.info(fmt.dim(`Saved preference → ${ownership} mode`));
+          log.blank();
+        } else {
+          ownership = 'section';
+        }
+      }
+    } catch {
+      // Non-interactive or read error — default to full
+    }
+  }
+
+  // ── Initial run ──────────────────────────────────────────
+  const result = await runOnce(ctx, ownership);
+  if (result.code !== ExitCode.OK) return result.code;
+
+  // Keep track of latest KB for complaint processing
+  let latestKb = result.kbContent;
+
+  // ── --once: process any queued complaints, then exit ──────
+  if (flags.once) {
+    if (store.state.complaintQueue.length > 0) {
+      await processComplaints(ctx, ownership, latestKb);
+    }
+    return ExitCode.OK;
+  }
 
   // ── Watch mode ────────────────────────────────────────────
   log.blank();
   log.info(fmt.dim('Watching for changes… (Ctrl+C to stop)'));
+  store.setPhase('watching');
 
   const chokidarModule = await import('chokidar');
   const chokidar = chokidarModule.default ?? chokidarModule;
@@ -153,7 +215,10 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     try {
       log.blank();
       log.info(`${fmt.bold('change detected:')} ${reason}`);
-      await runOnce(ctx);
+      store.setLastChange(reason);
+      const runResult = await runOnce(ctx, ownership);
+      if (runResult.kbContent) latestKb = runResult.kbContent;
+      store.setPhase('watching');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`Pipeline failed: ${msg}`);
@@ -185,10 +250,26 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   await new Promise<void>((resolve) => watcher.once('ready', resolve));
   log.info(fmt.dim('Watcher ready.'));
 
+  // ── Complaint polling — check for queued complaints periodically ──
+  const COMPLAINT_POLL_MS = 500;
+  const complaintPoll = setInterval(async () => {
+    if (stopped || running || store.state.complaintQueue.length === 0) return;
+    running = true;
+    try {
+      await processComplaints(ctx, ownership, latestKb);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`Complaint processing failed: ${msg}`);
+    } finally {
+      running = false;
+    }
+  }, COMPLAINT_POLL_MS);
+
   return await new Promise<ExitCodeValue>((resolve) => {
     const shutdown = async (signal: string) => {
       if (stopped) return;
       stopped = true;
+      clearInterval(complaintPoll);
       if (timer) { clearTimeout(timer); timer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));
