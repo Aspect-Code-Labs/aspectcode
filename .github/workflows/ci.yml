@@ -34,11 +34,11 @@ jobs:
       - name: Build emitters
         run: npm run build --workspace=packages/emitters
 
-      - name: Build CLI
-        run: npm run build --workspace=packages/cli
-
       - name: Build optimizer
         run: npm run build --workspace=packages/optimizer
+
+      - name: Build CLI
+        run: npm run build --workspace=packages/cli
 
       # ---- Tests ----
       - name: Test core
@@ -47,11 +47,11 @@ jobs:
       - name: Test emitters
         run: npm test --workspace=packages/emitters
 
-      - name: Test CLI
-        run: npm test --workspace=packages/cli
-
       - name: Test optimizer
         run: npm test --workspace=packages/optimizer
+
+      - name: Test CLI
+        run: npm test --workspace=packages/cli
 
       # ---- Extension checks ----
       - name: Typecheck extension

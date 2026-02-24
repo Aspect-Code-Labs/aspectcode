@@ -33,11 +33,11 @@ jobs:
       - name: Build emitters
         run: npm run build --workspace=packages/emitters
 
-      - name: Build CLI
-        run: npm run build --workspace=packages/cli
-
       - name: Build optimizer
         run: npm run build --workspace=packages/optimizer
+
+      - name: Build CLI
+        run: npm run build --workspace=packages/cli
 
       - name: Create Release Pull Request or Publish
         id: changesets

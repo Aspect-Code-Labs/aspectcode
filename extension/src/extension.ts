@@ -23,20 +23,27 @@ let isRunning = false;
 // CLI Resolution
 // ============================================================================
 
-function resolveCliBin(workspaceRoot: string, extensionPath: string): { node: string; script: string } | { bin: string } {
+function resolveCliBin(
+  workspaceRoot: string,
+  extensionPath: string,
+): { node: string; script: string } | { bin: string } {
   // 1. Bundled inside extension
   const bundledScript = path.join(extensionPath, 'cli-bundle', 'bin', 'aspectcode.js');
   try {
     fs.accessSync(bundledScript);
     return { node: process.execPath, script: bundledScript };
-  } catch { /* not found */ }
+  } catch {
+    /* not found */
+  }
 
   // 2. Workspace-local (monorepo dev)
   const localScript = path.join(workspaceRoot, 'packages', 'cli', 'bin', 'aspectcode.js');
   try {
     fs.accessSync(localScript);
     return { node: process.execPath, script: localScript };
-  } catch { /* not found */ }
+  } catch {
+    /* not found */
+  }
 
   // 3. Global fallback
   return { bin: 'aspectcode' };
@@ -154,8 +161,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(statusBarItem);
   updateStatusBar();
 
-  const getRoot = (): string | undefined =>
-    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const getRoot = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
   // ── Commands: start / stop ───────────────────────────────
   context.subscriptions.push(

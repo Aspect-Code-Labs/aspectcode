@@ -156,13 +156,18 @@ if (-not $SkipBuild) {
 }))
 
 [void]$results.Add((Invoke-Step -Name 'Unknown flag warning path' -Action {
-  & node $cliBin --once --root $sandboxRoot --bogus-flag --quiet 2>&1 | Out-Null
+  # Temporarily allow stderr so the warning doesn't become a terminating error
+  $ErrorActionPreference = 'SilentlyContinue'
+  & node $cliBin --once --root $sandboxRoot --bogus-flag --quiet 2>$null
+  $ErrorActionPreference = 'Stop'
   # Should still succeed (unknown flags print a warning but don't error)
   if ($LASTEXITCODE -ne 0) { throw 'unknown flag path failed' }
 }))
 
 [void]$results.Add((Invoke-Step -Name 'CLI --no-color path' -Action {
-  & node $cliBin --once --root $sandboxRoot --no-color --quiet 2>&1 | Out-Null
+  $ErrorActionPreference = 'SilentlyContinue'
+  & node $cliBin --once --root $sandboxRoot --no-color --quiet 2>$null
+  $ErrorActionPreference = 'Stop'
   if ($LASTEXITCODE -ne 0) { throw '--no-color path failed' }
 }))
 
