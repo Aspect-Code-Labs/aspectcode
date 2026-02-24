@@ -25,6 +25,7 @@ import { readToolInstructions } from './toolIngestion';
 import { writeAgentsMd, writeKbMd, hasMarkers } from './writer';
 import type { OwnershipMode } from './writer';
 import { tryOptimize } from './optimize';
+import { processComplaints } from './complaintProcessor';
 import { selectPrompt } from './ui/prompts';
 import { store } from './ui/store';
 
@@ -48,9 +49,17 @@ function isSupportedSourceFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.includes(ext);
 }
 
+// ── Single pipeline run result ───────────────────────────────
+
+interface RunOnceResult {
+  code: ExitCodeValue;
+  /** KB content from this run (used by complaint processor). */
+  kbContent: string;
+}
+
 // ── Single pipeline run ──────────────────────────────────────
 
-async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<ExitCodeValue> {
+async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
   const startMs = Date.now();
@@ -61,7 +70,7 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<ExitC
   const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet, spin: ctx.spin });
   if (workspace.discoveredPaths.length === 0) {
     log.warn('No source files found. Check your workspace or exclude patterns.');
-    return ExitCode.ERROR;
+    return { code: ExitCode.ERROR, kbContent: '' };
   }
 
   // ── 2. Analyze ────────────────────────────────────────────
@@ -119,7 +128,7 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<ExitC
   store.setElapsed(`${(elapsedMs / 1000).toFixed(1)}s`);
   store.setPhase('done');
   log.info(fmt.dim(`Done in ${(elapsedMs / 1000).toFixed(1)}s`));
-  return ExitCode.OK;
+  return { code: ExitCode.OK, kbContent };
 }
 
 // ── Pipeline entry point ─────────────────────────────────────
@@ -161,11 +170,19 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   }
 
   // ── Initial run ──────────────────────────────────────────
-  const code = await runOnce(ctx, ownership);
-  if (code !== ExitCode.OK) return code;
+  const result = await runOnce(ctx, ownership);
+  if (result.code !== ExitCode.OK) return result.code;
 
-  // ── --once: exit immediately ──────────────────────────────
-  if (flags.once) return ExitCode.OK;
+  // Keep track of latest KB for complaint processing
+  let latestKb = result.kbContent;
+
+  // ── --once: process any queued complaints, then exit ──────
+  if (flags.once) {
+    if (store.state.complaintQueue.length > 0) {
+      await processComplaints(ctx, ownership, latestKb);
+    }
+    return ExitCode.OK;
+  }
 
   // ── Watch mode ────────────────────────────────────────────
   log.blank();
@@ -199,7 +216,8 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       log.blank();
       log.info(`${fmt.bold('change detected:')} ${reason}`);
       store.setLastChange(reason);
-      await runOnce(ctx, ownership);
+      const runResult = await runOnce(ctx, ownership);
+      if (runResult.kbContent) latestKb = runResult.kbContent;
       store.setPhase('watching');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -232,10 +250,26 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   await new Promise<void>((resolve) => watcher.once('ready', resolve));
   log.info(fmt.dim('Watcher ready.'));
 
+  // ── Complaint polling — check for queued complaints periodically ──
+  const COMPLAINT_POLL_MS = 500;
+  const complaintPoll = setInterval(async () => {
+    if (stopped || running || store.state.complaintQueue.length === 0) return;
+    running = true;
+    try {
+      await processComplaints(ctx, ownership, latestKb);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`Complaint processing failed: ${msg}`);
+    } finally {
+      running = false;
+    }
+  }, COMPLAINT_POLL_MS);
+
   return await new Promise<ExitCodeValue>((resolve) => {
     const shutdown = async (signal: string) => {
       if (stopped) return;
       stopped = true;
+      clearInterval(complaintPoll);
       if (timer) { clearTimeout(timer); timer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));

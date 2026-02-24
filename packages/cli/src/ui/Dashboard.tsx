@@ -8,7 +8,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import type { Key } from 'ink';
 import { COLORS, getBannerText } from './theme';
 import { store } from './store';
 import type { DashboardState, PipelinePhase } from './store';
@@ -58,6 +59,12 @@ function statsText(s: DashboardState): string {
 
 // ── Component ────────────────────────────────────────────────
 
+/** Phases where the complaint input is shown. */
+const INPUT_VISIBLE = new Set<PipelinePhase>([
+  'watching', 'done', 'idle',
+  'discovering', 'analyzing', 'building-kb', 'optimizing', 'writing',
+]);
+
 const Dashboard: React.FC = () => {
   const [s, setS] = useState<DashboardState>({ ...store.state });
   useEffect(() => {
@@ -66,8 +73,37 @@ const Dashboard: React.FC = () => {
     return () => { store.removeListener('change', fn); };
   }, []);
 
+  // ── Complaint text input via useInput ────────────────────
+  useInput((input: string, key: Key) => {
+    if (key.return) {
+      const text = store.state.complaintInput.trim();
+      if (text.length > 0) {
+        store.queueComplaint(text);
+      }
+      return;
+    }
+    if (key.backspace || key.delete) {
+      const cur = store.state.complaintInput;
+      if (cur.length > 0) {
+        store.setComplaintInput(cur.slice(0, -1));
+      }
+      return;
+    }
+    if (key.escape) {
+      store.setComplaintInput('');
+      return;
+    }
+    // Ignore control / arrow / meta keys
+    if (key.ctrl || key.meta || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) {
+      return;
+    }
+    if (input) {
+      store.setComplaintInput(store.state.complaintInput + input);
+    }
+  });
+
   const working = WORKING.has(s.phase);
-  const spinner = useSpinner(working);
+  const spinner = useSpinner(working || s.processingComplaint);
   const stats = statsText(s);
   const detail = s.phaseDetail ? ` (${s.phaseDetail})` : '';
 
@@ -78,21 +114,40 @@ const Dashboard: React.FC = () => {
         <Text color={COLORS.primary} bold>{getBannerText()}</Text>
       </Box>
 
+      {/* ── Complaint input ──────────────────────────── */}
+      {INPUT_VISIBLE.has(s.phase) && (
+        <Box>
+          <Text color={COLORS.primary}>{'  ❯ '}</Text>
+          <Text color={COLORS.white}>{s.complaintInput}</Text>
+          <Text color={COLORS.primaryDim}>{'▌'}</Text>
+        </Box>
+      )}
+
+      {/* ── Queued complaints indicator ──────────────── */}
+      {s.complaintQueue.length > 0 && (
+        <Text color={COLORS.primaryDim}>
+          {`  ${s.complaintQueue.length} complaint${s.complaintQueue.length === 1 ? '' : 's'} queued`}
+        </Text>
+      )}
+
       {/* ── Status line ──────────────────────────────── */}
       <Box>
-        {working && (
+        {s.processingComplaint && (
+          <Text color={COLORS.primary}>{`  ${spinner} Processing complaint…`}</Text>
+        )}
+        {!s.processingComplaint && working && (
           <Text color={COLORS.primary}>{`  ${spinner} ${PHASE_TEXT[s.phase]}${detail}`}</Text>
         )}
-        {s.phase === 'watching' && (
+        {!s.processingComplaint && s.phase === 'watching' && (
           <Text color={COLORS.green}>{'  ● Watching'}</Text>
         )}
-        {s.phase === 'done' && s.outputs.length > 0 && (
+        {!s.processingComplaint && s.phase === 'done' && s.outputs.length > 0 && (
           <Text color={COLORS.green}>{`  ✔ ${s.outputs.join(', ')}`}</Text>
         )}
-        {s.phase === 'done' && s.outputs.length === 0 && (
+        {!s.processingComplaint && s.phase === 'done' && s.outputs.length === 0 && (
           <Text color={COLORS.green}>{'  ✔ Done'}</Text>
         )}
-        {s.phase === 'error' && (
+        {!s.processingComplaint && s.phase === 'error' && (
           <Text color={COLORS.red}>{'  ✖ Error'}</Text>
         )}
         {stats !== '' && (
@@ -112,6 +167,16 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
+      {/* ── Complaint changes ────────────────────────── */}
+      {s.complaintChanges.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={COLORS.primary}>{'  Complaint changes applied:'}</Text>
+          {s.complaintChanges.map((c, i) => (
+            <Text key={i} color={COLORS.primaryDim}>{`    → ${c}`}</Text>
+          ))}
+        </Box>
+      )}
+
       {/* ── Optimization reasoning ───────────────────── */}
       {s.reasoning.length > 0 && (s.phase === 'done' || s.phase === 'watching') && (
         <Box flexDirection="column" marginTop={1}>
@@ -124,7 +189,10 @@ const Dashboard: React.FC = () => {
 
       {/* ── Watch hint ───────────────────────────────── */}
       {s.phase === 'watching' && (
-        <Text color={COLORS.gray} dimColor>{'  Ctrl+C to stop'}</Text>
+        <Text color={COLORS.gray} dimColor>{'  Type a complaint above, or Ctrl+C to stop'}</Text>
+      )}
+      {s.phase === 'done' && (
+        <Text color={COLORS.gray} dimColor>{'  Type a complaint above to refine AGENTS.md'}</Text>
       )}
     </Box>
   );

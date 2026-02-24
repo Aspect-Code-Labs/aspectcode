@@ -33,6 +33,14 @@ export interface DashboardState {
   outputs: string[];
   /** Optimization reasoning lines from the agent (score + feedback per iteration). */
   reasoning: string[];
+  /** Current complaint text being typed by the user. */
+  complaintInput: string;
+  /** Queued complaints awaiting processing. */
+  complaintQueue: string[];
+  /** Human-readable change descriptions from the last complaint processing. */
+  complaintChanges: string[];
+  /** True while the complaint processor is running. */
+  processingComplaint: boolean;
 }
 
 /**
@@ -50,6 +58,10 @@ class DashboardStore extends EventEmitter {
     warning: '',
     outputs: [],
     reasoning: [],
+    complaintInput: '',
+    complaintQueue: [],
+    complaintChanges: [],
+    processingComplaint: false,
   };
 
   private update(patch: Partial<DashboardState>): void {
@@ -89,6 +101,40 @@ class DashboardStore extends EventEmitter {
     this.update({ reasoning });
   }
 
+  // ── Complaint methods ───────────────────────────────────
+
+  setComplaintInput(text: string): void {
+    this.update({ complaintInput: text });
+  }
+
+  queueComplaint(complaint: string): void {
+    this.update({
+      complaintQueue: [...this.state.complaintQueue, complaint],
+      complaintInput: '',
+    });
+  }
+
+  /** Remove and return the next queued complaint (or undefined). */
+  shiftComplaint(): string | undefined {
+    const [next, ...rest] = this.state.complaintQueue;
+    if (next !== undefined) {
+      this.update({ complaintQueue: rest });
+    }
+    return next;
+  }
+
+  setProcessingComplaint(processing: boolean): void {
+    this.update({ processingComplaint: processing });
+  }
+
+  setComplaintChanges(changes: string[]): void {
+    this.update({ complaintChanges: changes });
+  }
+
+  clearComplaintChanges(): void {
+    this.update({ complaintChanges: [] });
+  }
+
   /** Reset per-run state for a fresh pipeline run. */
   resetRun(): void {
     this.update({
@@ -98,6 +144,7 @@ class DashboardStore extends EventEmitter {
       elapsed: '',
       provider: '',
       phaseDetail: '',
+      // Note: complaintQueue, complaintInput, complaintChanges are preserved
     });
   }
 }

@@ -117,6 +117,41 @@ export const PROVIDER_ENV_KEYS = {
 
 export type ProviderName = keyof typeof PROVIDER_ENV_KEYS;
 
+// ── Complaint-driven optimization ───────────────────────────
+
+/** Options for processing a user complaint against the current AGENTS.md. */
+export interface ComplaintOptions {
+  /** Current AGENTS.md content. */
+  currentInstructions: string;
+
+  /** Full KB content (architecture + map + context). */
+  kb: string;
+
+  /** One or more user-supplied complaints about AI behaviour. */
+  complaints: string[];
+
+  /** LLM provider to use. */
+  provider: LlmProvider;
+
+  /** Optional logger. */
+  log?: OptLogger;
+
+  /** Character budget for KB in prompts. Default: 60000. */
+  kbCharBudget?: number;
+
+  /** AbortSignal for cooperative cancellation. */
+  signal?: AbortSignal;
+}
+
+/** Result of complaint-driven optimization. */
+export interface ComplaintResult {
+  /** Updated AGENTS.md content. */
+  optimizedInstructions: string;
+
+  /** Human-readable list of changes applied (one per complaint). */
+  changes: string[];
+}
+
 /** Optional env-var to force a specific provider. */
 export const LLM_PROVIDER_ENV = 'LLM_PROVIDER';
 

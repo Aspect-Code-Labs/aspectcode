@@ -9,12 +9,14 @@
  * 5. After maxIterations, returns the best candidate seen.
  */
 
-import type { ChatMessage, OptimizeOptions, OptimizeResult, EvalResult } from './types';
+import type { ChatMessage, OptimizeOptions, OptimizeResult, EvalResult, ComplaintOptions, ComplaintResult } from './types';
 import {
   buildSystemPrompt,
   buildOptimizePrompt,
   buildEvalPrompt,
   parseEvalResponse,
+  buildComplaintPrompt,
+  parseComplaintResponse,
 } from './prompts';
 
 /** Default minimum eval score to accept a candidate without further iteration. */
@@ -152,5 +154,58 @@ export async function runOptimizeAgent(options: OptimizeOptions): Promise<Optimi
     optimizedInstructions: bestCandidate,
     iterations: maxIterations,
     reasoning,
+  };
+}
+
+// ── Complaint agent ──────────────────────────────────────────
+
+/**
+ * Process user complaints by asking the LLM to update AGENTS.md instructions.
+ *
+ * Unlike the iterative optimize agent, this is a single-call workflow:
+ * 1. Send system context (KB) + complaint prompt.
+ * 2. Parse structured response for changes list + updated instructions.
+ */
+export async function runComplaintAgent(options: ComplaintOptions): Promise<ComplaintResult> {
+  const {
+    currentInstructions,
+    kb,
+    complaints,
+    provider,
+    log,
+    kbCharBudget,
+    signal,
+  } = options;
+
+  if (signal?.aborted) {
+    log?.info('Complaint processing cancelled.');
+    return { optimizedInstructions: currentInstructions, changes: [] };
+  }
+
+  log?.info(`Processing ${complaints.length} complaint${complaints.length === 1 ? '' : 's'}…`);
+
+  const systemPrompt = buildSystemPrompt(kb, kbCharBudget);
+  const userPrompt = buildComplaintPrompt(currentInstructions, complaints);
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ];
+
+  let response: string;
+  try {
+    response = await provider.chat(messages);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log?.error(`Complaint LLM call failed: ${msg}`);
+    return { optimizedInstructions: currentInstructions, changes: [`Error: ${msg}`] };
+  }
+
+  const parsed = parseComplaintResponse(response);
+  log?.info(`Applied ${parsed.changes.length} change${parsed.changes.length === 1 ? '' : 's'}.`);
+
+  return {
+    optimizedInstructions: parsed.instructions,
+    changes: parsed.changes,
   };
 }

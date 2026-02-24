@@ -13,6 +13,8 @@ export type {
   EvalResult,
   OptLogger,
   ProviderName,
+  ComplaintOptions,
+  ComplaintResult,
 } from './types';
 export { PROVIDER_ENV_KEYS, LLM_PROVIDER_ENV, LLM_MODEL_ENV } from './types';
 
@@ -21,11 +23,13 @@ export { createOpenAiProvider } from './providers/openai';
 export { createAnthropicProvider } from './providers/anthropic';
 export { withRetry } from './providers/retry';
 export type { RetryOptions } from './providers/retry';
-export { runOptimizeAgent } from './agent';
+export { runOptimizeAgent, runComplaintAgent } from './agent';
 export {
   buildSystemPrompt,
   buildOptimizePrompt,
   buildEvalPrompt,
   parseEvalResponse,
   truncateKb,
+  buildComplaintPrompt,
+  parseComplaintResponse,
 } from './prompts';
