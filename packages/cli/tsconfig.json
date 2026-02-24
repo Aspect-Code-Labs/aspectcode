@@ -17,13 +17,14 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "jsx": "react"
   },
   "references": [
     { "path": "../core" },
     { "path": "../emitters" },
     { "path": "../optimizer" }
   ],
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist", "test"]
 }

@@ -16,13 +16,17 @@ import { createNodeEmitterHost } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import { ExitCode } from './cli';
 import type { ExitCodeValue } from './cli';
-import { loadConfig } from './config';
-import { fmt, createSpinner } from './logger';
+import { loadConfig, saveConfig } from './config';
+import type { AspectCodeConfig } from './config';
+import { fmt } from './logger';
 import { loadWorkspaceFiles } from './workspace';
 import { buildKbContent } from './kbBuilder';
 import { readToolInstructions } from './toolIngestion';
-import { writeAgentsMd, writeKbMd } from './writer';
+import { writeAgentsMd, writeKbMd, hasMarkers } from './writer';
+import type { OwnershipMode } from './writer';
 import { tryOptimize } from './optimize';
+import { selectPrompt } from './ui/prompts';
+import { store } from './ui/store';
 
 // ── Watch constants ──────────────────────────────────────────
 
@@ -46,20 +50,21 @@ function isSupportedSourceFile(filePath: string): boolean {
 
 // ── Single pipeline run ──────────────────────────────────────
 
-async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
+async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<ExitCodeValue> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
   const startMs = Date.now();
 
   // ── 1. Discover & read files ──────────────────────────────
-  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet });
+  store.setPhase('discovering');
+  const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet, spin: ctx.spin });
   if (workspace.discoveredPaths.length === 0) {
     log.warn('No source files found. Check your workspace or exclude patterns.');
     return ExitCode.ERROR;
   }
 
   // ── 2. Analyze ────────────────────────────────────────────
-  const spinAnalyze = createSpinner('Analyzing…', { quiet: flags.quiet });
+  const spinAnalyze = ctx.spin('Analyzing…', 'analyzing');
   const model = await analyzeRepoWithDependencies(
     root,
     workspace.relativeFiles,
@@ -69,9 +74,10 @@ async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
   spinAnalyze.stop(
     `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
   );
+  store.setStats(model.files.length, model.graph.edges.length);
 
   // ── 3. Build KB content in memory ─────────────────────────
-  const spinKb = createSpinner('Building knowledge base…', { quiet: flags.quiet });
+  const spinKb = ctx.spin('Building knowledge base…', 'building-kb');
   const kbContent = buildKbContent(model, root, workspace.relativeFiles);
   spinKb.stop('Knowledge base built');
 
@@ -83,18 +89,21 @@ async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
   }
 
   // ── 5. Optimize or fallback ───────────────────────────────
+  store.setPhase('optimizing');
   const agentsContent = await tryOptimize(ctx, kbContent, toolInstructions, config);
 
   // ── 6. Write AGENTS.md ────────────────────────────────────
+  store.setPhase('writing');
   if (flags.dryRun) {
     log.info(fmt.bold('Dry run — proposed AGENTS.md:'));
     log.blank();
     console.log(agentsContent);
     log.blank();
   } else {
-    await writeAgentsMd(host, root, agentsContent);
+    await writeAgentsMd(host, root, agentsContent, ownership);
     const agentsPath = path.relative(root, path.join(root, 'AGENTS.md')).replace(/\\/g, '/');
-    log.success(`${agentsPath} written`);
+    const modeLabel = ownership === 'section' ? ' (section)' : '';
+    log.success(`${agentsPath} written${modeLabel}`);
   }
 
   // ── 7. Optionally write kb.md ─────────────────────────────
@@ -104,6 +113,7 @@ async function runOnce(ctx: RunContext): Promise<ExitCodeValue> {
   }
 
   const elapsedMs = Date.now() - startMs;
+  store.setElapsed(`${(elapsedMs / 1000).toFixed(1)}s`);
   log.info(fmt.dim(`Done in ${(elapsedMs / 1000).toFixed(1)}s`));
   return ExitCode.OK;
 }
@@ -116,8 +126,38 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
 
+  // ── Resolve AGENTS.md ownership mode ─────────────────────
+  const config: AspectCodeConfig | undefined = loadConfig(root);
+  let ownership: OwnershipMode = config?.ownership ?? 'full';
+
+  // If AGENTS.md exists and we haven't stored a preference yet, ask
+  if (!config?.ownership) {
+    try {
+      const fs = await import('fs');
+      const agentsPath = path.join(root, 'AGENTS.md');
+      if (fs.existsSync(agentsPath)) {
+        const existing = fs.readFileSync(agentsPath, 'utf-8');
+        if (!hasMarkers(existing)) {
+          const idx = await selectPrompt(
+            'AGENTS.md already exists. How should AspectCode manage it?',
+            ['Replace entire file (full ownership)', 'Own a section (preserve your content)'],
+            0,
+          );
+          ownership = idx === 1 ? 'section' : 'full';
+          saveConfig(root, { ownership });
+          log.info(fmt.dim(`Saved preference → ${ownership} mode`));
+          log.blank();
+        } else {
+          ownership = 'section';
+        }
+      }
+    } catch {
+      // Non-interactive or read error — default to full
+    }
+  }
+
   // ── Initial run ──────────────────────────────────────────
-  const code = await runOnce(ctx);
+  const code = await runOnce(ctx, ownership);
   if (code !== ExitCode.OK) return code;
 
   // ── --once: exit immediately ──────────────────────────────
@@ -126,6 +166,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   // ── Watch mode ────────────────────────────────────────────
   log.blank();
   log.info(fmt.dim('Watching for changes… (Ctrl+C to stop)'));
+  store.setPhase('watching');
 
   const chokidarModule = await import('chokidar');
   const chokidar = chokidarModule.default ?? chokidarModule;
@@ -153,7 +194,9 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     try {
       log.blank();
       log.info(`${fmt.bold('change detected:')} ${reason}`);
-      await runOnce(ctx);
+      store.setLastChange(reason);
+      await runOnce(ctx, ownership);
+      store.setPhase('watching');
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`Pipeline failed: ${msg}`);

@@ -15,6 +15,7 @@ import { generateCanonicalContentForMode } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import type { AspectCodeConfig } from './config';
 import { fmt } from './logger';
+import { store } from './ui/store';
 
 /**
  * Try to optimize AGENTS.md content via LLM.
@@ -67,6 +68,7 @@ export async function tryOptimize(
   }
 
   log.info(`Optimizing with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
+  store.setProvider(model ? `${provider.name} (${model})` : provider.name);
 
   // ── Build current instructions (read existing AGENTS.md or use static) ──
   let currentInstructions: string;
