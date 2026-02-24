@@ -90,6 +90,8 @@ export interface RunContext {
   log: Logger;
   /** Spinner factory (dashboard-aware or plain). */
   spin: SpinnerFactory;
+  /** Pre-resolved AGENTS.md ownership mode. */
+  ownership: 'full' | 'section';
 }
 
 // ── Flag-def helpers ─────────────────────────────────────────

@@ -17,7 +17,6 @@ import type { RunContext } from './cli';
 import { ExitCode } from './cli';
 import type { ExitCodeValue } from './cli';
 import { loadConfig, saveConfig } from './config';
-import type { AspectCodeConfig } from './config';
 import { fmt } from './logger';
 import { loadWorkspaceFiles } from './workspace';
 import { buildKbContent } from './kbBuilder';
@@ -133,41 +132,43 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
 
 // ── Pipeline entry point ─────────────────────────────────────
 
+/**
+ * Resolve AGENTS.md ownership mode.
+ *
+ * Called from main() BEFORE the ink dashboard is mounted, because
+ * the interactive prompt uses raw stdin which conflicts with ink's useInput.
+ */
+export async function resolveOwnership(root: string): Promise<OwnershipMode> {
+  const config = loadConfig(root);
+  if (config?.ownership) return config.ownership;
+
+  try {
+    const fs = await import('fs');
+    const agentsPath = path.join(root, 'AGENTS.md');
+    if (fs.existsSync(agentsPath)) {
+      const existing = fs.readFileSync(agentsPath, 'utf-8');
+      if (hasMarkers(existing)) return 'section';
+
+      const idx = await selectPrompt(
+        'AGENTS.md already exists. How should AspectCode manage it?',
+        ['Replace entire file (full ownership)', 'Own a section (preserve your content)'],
+        0,
+      );
+      const ownership: OwnershipMode = idx === 1 ? 'section' : 'full';
+      saveConfig(root, { ownership });
+      return ownership;
+    }
+  } catch {
+    // Non-interactive or read error — default to full
+  }
+  return 'full';
+}
+
 export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
-  const { root, flags, log } = ctx;
+  const { root, flags, log, ownership } = ctx;
 
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
-
-  // ── Resolve AGENTS.md ownership mode ─────────────────────
-  const config: AspectCodeConfig | undefined = loadConfig(root);
-  let ownership: OwnershipMode = config?.ownership ?? 'full';
-
-  // If AGENTS.md exists and we haven't stored a preference yet, ask
-  if (!config?.ownership) {
-    try {
-      const fs = await import('fs');
-      const agentsPath = path.join(root, 'AGENTS.md');
-      if (fs.existsSync(agentsPath)) {
-        const existing = fs.readFileSync(agentsPath, 'utf-8');
-        if (!hasMarkers(existing)) {
-          const idx = await selectPrompt(
-            'AGENTS.md already exists. How should AspectCode manage it?',
-            ['Replace entire file (full ownership)', 'Own a section (preserve your content)'],
-            0,
-          );
-          ownership = idx === 1 ? 'section' : 'full';
-          saveConfig(root, { ownership });
-          log.info(fmt.dim(`Saved preference → ${ownership} mode`));
-          log.blank();
-        } else {
-          ownership = 'section';
-        }
-      }
-    } catch {
-      // Non-interactive or read error — default to full
-    }
-  }
 
   // ── Initial run ──────────────────────────────────────────
   const result = await runOnce(ctx, ownership);
