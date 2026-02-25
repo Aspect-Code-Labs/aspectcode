@@ -10,6 +10,8 @@
   - Optimizer now accepts evaluator feedback to self-correct instructions across iterations
   - CLI dashboard overhauled: terminal clears before launch, setup notes show config/API key/tool status, evaluator progress displays harvest counts, probe pass rates, and diagnosis fixes in real time with a live elapsed timer; complaint input hidden during active work phases
   - CI workflows updated to build and test the evaluator package in dependency order
+  - Fix: `@aspectcode/evaluator` was missing from CLI prepack materialisation, causing `Cannot find module '@aspectcode/evaluator'` after global install. The prepack script now derives its package list from `bundledDependencies` in `package.json` (single source of truth) and validates each materialised package before packing.
+  - New CI check (`check:bundled`): scans CLI source imports and verifies all runtime `@aspectcode/*` dependencies are listed in `bundledDependencies`, preventing this class of packaging bug in the future.
 
 - Updated dependencies [[`cdb5511`](https://github.com/asashepard/aspectcode/commit/cdb5511bfc29977db995bbc07b0a7ce54cf961d2)]:
   - @aspectcode/evaluator@0.3.4

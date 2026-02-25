@@ -22,8 +22,9 @@ Development Host.
 ## Repository Structure
 
 ```
-packages/core/        @aspectcode/core       Pure analysis (no vscode)
+packages/core/        @aspectcode/core        Pure analysis (no vscode)
 packages/emitters/    @aspectcode/emitters    Artifact generation
+packages/evaluator/   @aspectcode/evaluator   Evidence-based evaluation
 packages/optimizer/   @aspectcode/optimizer   LLM-based optimization
 packages/cli/         aspectcode              CLI entry point
 extension/                                    VS Code extension (thin launcher)
@@ -39,7 +40,7 @@ Full architecture: [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)
 | Command | What it does |
 |---------|-------------|
 | `npm install` | Install all workspace dependencies |
-| `npm run build --workspaces` | Build core → emitters → optimizer → cli |
+| `npm run build --workspaces` | Build core → emitters → optimizer → evaluator → cli |
 | `npm test --workspaces` | Run all package tests |
 
 ### Extension (`cd extension`)
@@ -132,7 +133,8 @@ them for inspection.
 Aspect Code uses three CI tiers:
 
 - **Main CI (`.github/workflows/ci.yml`)** — runs on every push to `main` and every PR
-  - Builds and tests all packages (core, emitters, cli, optimizer)
+  - Builds and tests all packages (core, emitters, evaluator, optimizer, cli)
+  - Bundled-dependency check for CLI (`check:bundled`)
   - Extension typecheck, lint, format, filesize, boundaries, build
   - Parser parity check (`extension/parsers/` ↔ `packages/core/parsers/`)
 - **PR CI (`.github/workflows/ci-pr.yml`)**
@@ -154,7 +156,7 @@ npm run test:ci:repos
 
 ## Releasing
 
-### npm packages (`@aspectcode/core`, `@aspectcode/emitters`, `@aspectcode/optimizer`, `aspectcode`)
+### npm packages (`@aspectcode/core`, `@aspectcode/emitters`, `@aspectcode/evaluator`, `@aspectcode/optimizer`, `aspectcode`)
 
 Versioning and publishing is automated via [changesets](https://github.com/changesets/changesets):
 
@@ -210,8 +212,9 @@ Read **[docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)** and
 Key rules:
 
 1. **Package boundaries:** `core` has no `vscode` import. `emitters` depends
-   only on `core`. `optimizer` depends on `core` + `emitters`. `cli` depends
-   on all three. Extension spawns CLI as subprocess.
+   only on `core`. `optimizer` depends on `core` + `emitters`. `evaluator`
+   depends on `core` + `optimizer`. `cli` depends on all four. Extension
+   spawns CLI as subprocess.
 2. **File size limit:** New files must be ≤ 400 lines.
 3. **Formatting:** All code is formatted with Prettier. Run `npm run format`
    before committing.
