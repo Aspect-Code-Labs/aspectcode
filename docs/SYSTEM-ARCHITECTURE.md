@@ -23,12 +23,13 @@ The only network usage is the opt-in LLM optimizer (requires API key).
 ```
 aspectcode/                         ← npm workspaces root
 ├── packages/
-│   ├── core/       @aspectcode/core       Pure analysis (no vscode)
-│   ├── emitters/   @aspectcode/emitters   Artifact generation
+│   ├── core/       @aspectcode/core        Pure analysis (no vscode)
+│   ├── emitters/   @aspectcode/emitters    Artifact generation
+│   ├── evaluator/  @aspectcode/evaluator   Evidence-based evaluation
 │   ├── optimizer/  @aspectcode/optimizer   LLM-based optimization
-│   └── cli/        aspectcode             CLI entry point (npm package)
-├── extension/                             VS Code extension (thin launcher)
-└── docs/                                  This file, guides
+│   └── cli/        aspectcode              CLI entry point (npm package)
+├── extension/                              VS Code extension (thin launcher)
+└── docs/                                   This file, guides
 ```
 
 ### Dependency Graph
@@ -42,19 +43,23 @@ aspectcode/                         ← npm workspaces root
   ┌─────────────┐
   │     cli      │──uses──▶ @aspectcode/core
   │  (Node.js)   │──uses──▶ @aspectcode/emitters
+  │              │──uses──▶ @aspectcode/evaluator
   │              │──uses──▶ @aspectcode/optimizer
   └─────────────┘
         │
         ▼
-  ┌─────────────┐     ┌────────────────┐     ┌────────────────┐
-  │    core      │◀────│    emitters     │     │   optimizer    │
-  └─────────────┘     └────────────────┘     └────────────────┘
+  ┌─────────────┐     ┌────────────────┐     ┌────────────────┐     ┌────────────────┐
+  │    core      │◀────│    emitters     │     │   evaluator    │────▶│   optimizer    │
+  │              │     └────────────────┘     │                │     └────────────────┘
+  │              │◀───────────────────────────│                │
+  └─────────────┘                             └────────────────┘
 ```
 
-**Rule:** `core` has zero knowledge of `emitters`, `optimizer`, `cli`, or
-`extension`. `emitters` depends on `core` only. `optimizer` depends on
-`core` + `emitters`. `cli` depends on all three. `extension` spawns the
-CLI as a subprocess — no direct package imports.
+**Rule:** `core` has zero knowledge of `emitters`, `evaluator`, `optimizer`,
+`cli`, or `extension`. `emitters` depends on `core` only. `optimizer` depends
+on `core` + `emitters`. `evaluator` depends on `core` + `optimizer`. `cli`
+depends on all four. `extension` spawns the CLI as a subprocess — no direct
+package imports.
 
 ---
 
@@ -109,10 +114,25 @@ threshold met.
 
 Key types: `OptimizerOptions`, `AgentResult`.
 
+### @aspectcode/evaluator
+
+Evidence-based evaluation for generated content. Harvests real prompts
+from local AI tool logs (Claude Code, Cline, Aider, VS Code Copilot),
+runs probe-based micro-tests against KB content, and diagnoses failures
+with targeted fixes.
+
+| Export | Purpose |
+|--------|---------|
+| `evaluate(model, content, opts)` | Run probes against generated content |
+| `harvestPrompts(root)` | Collect prompts from local AI tool logs |
+| `applyDiagnosisEdits(content, diagnosis)` | Apply diagnostic fixes to content |
+
+Key types: `HarvestedPrompt`, `PromptSource`.
+
 ### aspectcode (CLI)
 
-Node.js command-line interface. Depends on `core`, `emitters`, and
-`optimizer`. No subcommands — single command with flags.
+Node.js command-line interface. Depends on `core`, `emitters`, `evaluator`,
+and `optimizer`. No subcommands — single command with flags.
 
 **Usage:** `aspectcode [options]`
 
@@ -161,7 +181,9 @@ aspectcode --once
   ├─ 4. runEmitters(model, host, opts)    @aspectcode/emitters
   │    ├─ KB emitter → .aspect/ (when --kb)
   │    └─ Instructions emitter → AGENTS.md (full-file ownership)
-  └─ 5. optimizer (when API key present)  @aspectcode/optimizer
+  ├─ 5. evaluator (when enabled)          @aspectcode/evaluator
+  │    └─ harvest prompts → run probes → diagnose → apply fixes
+  └─ 6. optimizer (when API key present)  @aspectcode/optimizer
        └─ evaluate → improve → accept loop on AGENTS.md
 ```
 
@@ -233,7 +255,8 @@ This prevents partial/corrupt output if a write fails mid-generation.
 | `@aspectcode/core` | mocha + ts-node | Snapshot tests against fixture repo |
 | `@aspectcode/emitters` | mocha + ts-node | KB, instructions, manifest, transaction |
 | `@aspectcode/optimizer` | mocha + ts-node | Agent, prompt, provider |
-| `aspectcode` | mocha + ts-node | parseArgs, config, generate, settings, watch |
+| `@aspectcode/evaluator` | mocha + ts-node | Evaluator probes and diagnosis |
+| `aspectcode` | mocha + ts-node | parseArgs, config; `check:bundled` CI script |
 
 All tests are offline. Temp directories via `os.tmpdir()`, fixed
 timestamps for determinism.

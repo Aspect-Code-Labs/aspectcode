@@ -38,6 +38,7 @@
     "prepublishOnly": "npm run build",
     "prepack": "node scripts/prepack.mjs",
     "postpack": "node scripts/postpack.mjs",
+    "check:bundled": "node scripts/check-bundled-deps.mjs",
     "test": "mocha --require ts-node/register 'test/**/*.test.ts'"
   },
   "bundledDependencies": [
@@ -68,3 +69,4 @@
     "typescript": "^5.5.4"
   }
 }
+

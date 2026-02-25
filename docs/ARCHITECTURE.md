@@ -34,6 +34,11 @@ Command Palette.
 │  packages/cli/  (aspectcode)                     │
 │  Single command: analyze → emit → optimize →     │──▶ @aspectcode/core
 │  watch. No subcommands.                          │──▶ @aspectcode/emitters
+│                                                  │──▶ @aspectcode/evaluator
+│                                                  │──▶ @aspectcode/optimizer
+├──────────────────────────────────────────────────┤
+│  packages/evaluator/  (@aspectcode/evaluator)    │
+│  Harvest prompts, run probes, diagnose failures  │──▶ @aspectcode/core
 │                                                  │──▶ @aspectcode/optimizer
 ├──────────────────────────────────────────────────┤
 │  packages/optimizer/  (@aspectcode/optimizer)    │
@@ -52,6 +57,7 @@ Command Palette.
 Packages:
 - **`@aspectcode/core`** — `analyzeRepo()`, `analyzeRepoWithDependencies()`, `discoverFiles()`, `DependencyAnalyzer`, tree-sitter grammars
 - **`@aspectcode/emitters`** — `runEmitters()`, KB emitter, instructions emitter, manifest, transactions
+- **`@aspectcode/evaluator`** — Evidence-based evaluation: prompt harvesting, probe micro-tests, diagnosis
 - **`@aspectcode/optimizer`** — LLM agentic loop for AGENTS.md quality improvement
 - **`aspectcode`** — Single command `aspectcode [flags]` with pipeline architecture
 
@@ -67,7 +73,8 @@ These rules are checked by `npm run check:boundaries`:
 - `packages/core/` has no `vscode` dependency — cannot import it.
 - `packages/emitters/` depends only on `core` — no `vscode`.
 - `packages/optimizer/` depends on `core` + `emitters` — no `vscode`.
-- `packages/cli/` depends on `core` + `emitters` + `optimizer` — no `vscode`.
+- `packages/evaluator/` depends on `core` + `optimizer` — no `vscode`.
+- `packages/cli/` depends on `core` + `emitters` + `evaluator` + `optimizer` — no `vscode`.
 - `extension/` spawns the CLI as a subprocess. No direct package imports.
 
 ## Naming Conventions
@@ -96,6 +103,7 @@ Enforced by `npm run check:filesize`:
 | Pure analysis logic (no vscode) | `packages/core/src/` |
 | Artifact generation / content builders | `packages/emitters/src/` |
 | LLM optimization logic | `packages/optimizer/src/` |
+| Evidence-based evaluation (probes, diagnosis) | `packages/evaluator/src/` |
 | CLI pipeline changes | `packages/cli/src/` |
 | Extension lifecycle / commands | `extension/src/extension.ts` |
 | Shared TypeScript types | `packages/core/src/` |
@@ -109,7 +117,8 @@ All tests run offline. No network access required.
 | `@aspectcode/core` | mocha + ts-node | Snapshot tests against fixture repo |
 | `@aspectcode/emitters` | mocha + ts-node | KB, instructions, manifest, transaction |
 | `@aspectcode/optimizer` | mocha + ts-node | Agent, prompt, provider |
-| `aspectcode` | mocha + ts-node | parseArgs, config, generate, settings, watch |
+| `@aspectcode/evaluator` | mocha + ts-node | Evaluator probes and diagnosis |
+| `aspectcode` | mocha + ts-node | parseArgs, config; `check:bundled` CI script |
 
 Run all: `npm test --workspaces`
 
