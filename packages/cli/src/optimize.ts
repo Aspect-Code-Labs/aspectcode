@@ -74,6 +74,7 @@ export async function tryOptimize(
     provider = resolveProvider(env, providerOptions);
   } catch {
     // No API key available — fall back to static content
+    store.addSetupNote('no API key — static mode');
     log.warn(
       'No LLM API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env for optimization.',
     );
@@ -83,8 +84,10 @@ export async function tryOptimize(
     };
   }
 
+  const providerLabel = model ? `${provider.name} (${model})` : provider.name;
+  store.addSetupNote(`API key: ${provider.name}`);
   log.info(`Optimizing with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
-  store.setProvider(model ? `${provider.name} (${model})` : provider.name);
+  store.setProvider(providerLabel);
 
   // ── Build current instructions (read existing AGENTS.md or use static) ──
   let currentInstructions: string;
@@ -132,6 +135,7 @@ export async function tryOptimize(
 
   if (evaluatorEnabled && (evalConfig?.harvestPrompts !== false)) {
     try {
+      store.setEvalStatus({ phase: 'harvesting' });
       store.setPhase('optimizing', 'harvesting prompts');
       harvestedPrompts = await harvestPrompts({
         root,
@@ -139,6 +143,7 @@ export async function tryOptimize(
         maxPerSource: 50,
         log: optLog,
       });
+      store.setEvalStatus({ phase: 'harvesting', harvestCount: harvestedPrompts.length });
       if (harvestedPrompts.length > 0) {
         log.info(`Harvested ${harvestedPrompts.length} prompts from AI tool history`);
       }
@@ -146,6 +151,10 @@ export async function tryOptimize(
       const msg = err instanceof Error ? err.message : String(err);
       log.debug(`Prompt harvesting failed (non-fatal): ${msg}`);
     }
+  }
+
+  if (evaluatorEnabled) {
+    store.addSetupNote('evaluator on');
   }
 
   const result = await runOptimizeAgent({
@@ -171,7 +180,8 @@ export async function tryOptimize(
 
   if (evaluatorEnabled) {
     try {
-      store.setPhase('optimizing', 'evaluating');
+      store.setPhase('evaluating');
+      store.setEvalStatus({ phase: 'probing' });
       log.info('Running probe-based evaluation…');
 
       const maxProbes = evalConfig?.maxProbes ?? 10;
@@ -187,6 +197,11 @@ export async function tryOptimize(
         signal: undefined,
       });
 
+      store.setEvalStatus({
+        phase: 'probing',
+        probesPassed: evalResult.passCount,
+        probesTotal: evalResult.totalProbes,
+      });
       log.info(
         `Probes: ${evalResult.passCount}/${evalResult.totalProbes} passed` +
         (evalResult.failCount > 0 ? `, ${evalResult.failCount} failed` : ''),
@@ -194,7 +209,8 @@ export async function tryOptimize(
 
       // Apply diagnosis edits if there are failures
       if (evalResult.diagnosis && evalResult.diagnosis.edits.length > 0) {
-        store.setPhase('optimizing', 'applying fixes');
+        store.setEvalStatus({ phase: 'diagnosing' });
+        store.setPhase('evaluating', 'applying fixes');
         log.info(`Applying ${evalResult.diagnosis.edits.length} diagnosis-driven edits…`);
 
         const fixed = await applyDiagnosisEdits(
@@ -206,6 +222,13 @@ export async function tryOptimize(
         finalContent = fixed.content;
         log.info(`Diagnosis edits applied (${fixed.appliedEdits.length} changes)`);
       }
+
+      store.setEvalStatus({
+        phase: 'done',
+        probesPassed: evalResult.passCount,
+        probesTotal: evalResult.totalProbes,
+        diagnosisEdits: evalResult.diagnosis?.edits.length ?? 0,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.warn(`Evaluation failed (non-fatal): ${msg}`);

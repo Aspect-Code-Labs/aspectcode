@@ -170,6 +170,9 @@ async function main(): Promise<void> {
       createDashboardSpinner((phase ?? 'idle') as PipelinePhase, msg);
 
     try {
+      // Clear terminal for a clean dashboard — removes ownership prompt artifacts
+      process.stdout.write('\x1bc');
+
       const { render } = await import('ink');
       const React = await import('react');
       const Dashboard = (await import('./ui/Dashboard')).default;
