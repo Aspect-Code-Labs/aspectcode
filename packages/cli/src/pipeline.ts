@@ -63,6 +63,8 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   const config = loadConfig(root);
   const startMs = Date.now();
   store.resetRun();
+  store.setRunStartMs(startMs);
+  store.addSetupNote(config ? 'config loaded' : 'no config');
 
   // ── 1. Discover & read files ──────────────────────────────
   store.setPhase('discovering');
@@ -94,6 +96,8 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   const host = createNodeEmitterHost();
   const toolInstructions = await readToolInstructions(host, root);
   if (toolInstructions.size > 0) {
+    const toolNames = [...toolInstructions.keys()].join(', ');
+    store.addSetupNote(`context: ${toolNames}`);
     log.debug(`Read ${toolInstructions.size} AI tool instruction file(s) as context`);
   }
 
