@@ -44,16 +44,19 @@ Your job is to improve AGENTS.md instructions — the guidelines that AI coding
 assistants follow when working in a codebase. You optimize these instructions
 so they are maximally useful, precise, and aligned with the actual codebase.
 
-You have access to the project's knowledge base which contains:
-- Architecture: high-risk files, directory layout, entry points
-- Map: data models, symbol index, naming conventions
-- Context: module clusters, external integrations, data flows
+Below is the project's internal knowledge base. Use it as YOUR private
+reference to understand the codebase — but NEVER reference it in the output.
+The AI assistant reading AGENTS.md will NOT have access to the knowledge base,
+Map section, symbol index, or any other external document. All codebase-specific
+guidance (file paths, naming conventions, key modules, architectural patterns)
+must be written directly as self-contained rules inside AGENTS.md.
 
-Use this knowledge to make the instructions specific, actionable, and grounded
-in the real structure of the codebase. Remove vague advice, strengthen specific
-guidance, and add project-specific rules that an AI assistant would benefit from.
+Forbidden in output:
+- References to "the Map", "the KB", "the knowledge base", "the Context section"
+- Phrases like "see kb.md", "consult the symbol index", "as shown in the Architecture section"
+- Any instruction that assumes access to a document besides AGENTS.md itself
 
-## Knowledge Base
+## Knowledge Base (private reference — do not mention in output)
 ${trimmedKb}`;
 
   if (toolInstructions) {
@@ -84,12 +87,15 @@ export function buildOptimizePrompt(
   priorFeedback?: string,
 ): string {
   let prompt = `Optimize the following AGENTS.md instructions. Make them more specific,
-actionable, and aligned with the knowledge base provided in the system prompt.
+actionable, and self-contained.
 
 ## Rules
 - Keep the same overall structure (sections, headers) unless restructuring improves clarity.
 - Remove generic advice that any developer already knows.
-- Add project-specific guidance derived from the knowledge base.
+- Inline project-specific guidance (file paths, naming conventions, key modules, architectural
+  patterns) directly as rules. Derive these from the knowledge base in the system prompt,
+  but NEVER reference the knowledge base, Map, or any external document in the output.
+- AGENTS.md must be fully self-contained — the AI reading it will have no other reference.
 - Be concise — every line should earn its place.
 - Output ONLY the optimized instruction content (no explanations or markdown fences).
 
@@ -130,11 +136,13 @@ export function buildEvalPrompt(
   return `You are evaluating AI coding assistant instructions (AGENTS.md) for quality.
 
 Score the following candidate instructions on a scale of 1–10 based on:
-1. **Specificity** — Are rules grounded in the actual codebase, not generic?
+1. **Specificity** — Are rules grounded in the actual codebase (real file paths, real patterns), not generic?
 2. **Actionability** — Can an AI assistant follow each rule unambiguously?
 3. **Completeness** — Are key architectural patterns and conventions covered?
 4. **Conciseness** — Is every line valuable, with no filler?
-5. **Alignment** — Do the instructions match the knowledge base accurately?
+5. **Self-contained** — Are ALL rules fully inline? The AI reading AGENTS.md will NOT have
+   access to any external document. Penalize any reference to "the Map", "the KB",
+   "the knowledge base", "kb.md", "the symbol index", or similar external documents.
 
 Respond in EXACTLY this format (no other text):
 SCORE: <number 1-10>
@@ -144,7 +152,7 @@ SUGGESTIONS:
 - <specific improvement 2>
 - <specific improvement 3>
 
-## Knowledge Base (for reference)
+## Knowledge Base (private reference — do not expect in output)
 ${trimmedKb}
 
 ## Candidate Instructions
@@ -204,6 +212,9 @@ ${currentInstructions}
 - Address EVERY complaint. For each one, add or modify a specific, actionable rule.
 - Do NOT remove existing rules unless they directly contradict a fix.
 - Keep instructions concise — each new rule should be one or two lines.
+- AGENTS.md must be fully self-contained. Never add rules that reference external
+  documents like the knowledge base, Map section, KB, or symbol index. The AI
+  reading AGENTS.md will not have access to any other file.
 - Output the FULL updated instructions (not just the diff).
 
 Respond in EXACTLY this format:
