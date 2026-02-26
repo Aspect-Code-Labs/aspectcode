@@ -9,7 +9,7 @@
 import {
   resolveProvider,
   loadEnvFile,
-  runOptimizeAgent,
+  runGenerateAgent,
 } from '@aspectcode/optimizer';
 import type { ProviderOptions, OptimizeStep } from '@aspectcode/optimizer';
 import {
@@ -34,11 +34,8 @@ export interface OptimizeOutput {
 }
 
 /**
- * Try to optimize AGENTS.md content via LLM.
+ * Try to generate AGENTS.md content via LLM using static analysis as context.
  * Falls back to static instruction content when no API key is available.
- *
- * @param baseContent  Pre-written static AGENTS.md content (already on disk).
- *                     Used as the seed for optimization instead of reading from disk.
  */
 export async function tryOptimize(
   ctx: RunContext,
@@ -96,11 +93,11 @@ export async function tryOptimize(
   if (evaluatorEnabled) {
     store.addSetupNote('evaluator on');
   }
-  log.info(`Optimizing with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
+  log.info(`Generating with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
   store.setProvider(providerLabel);
 
-  // ── Use base content as seed ──────────────────────────────
-  const currentInstructions = baseContent;
+  // ── Use static content only as fallback (LLM error / cancellation) ─
+  const fallbackContent = baseContent;
 
   // ── Build tool instructions context string ────────────────
   let toolContext = '';
@@ -155,8 +152,8 @@ export async function tryOptimize(
     }
   }
 
-  const result = await runOptimizeAgent({
-    currentInstructions,
+  const result = await runGenerateAgent({
+    currentInstructions: fallbackContent,
     kb: kbContent,
     toolInstructions: toolContext || undefined,
     provider,

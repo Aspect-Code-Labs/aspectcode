@@ -1,12 +1,12 @@
 /**
- * Tests for the single-pass optimization agent.
+ * Tests for the single-pass generation agent.
  *
  * All LLM calls are mocked via a fake LlmProvider.
  */
 
 import * as assert from 'node:assert/strict';
 import type { LlmProvider, ChatMessage, OptimizeOptions } from '../src/types';
-import { runOptimizeAgent } from '../src/agent';
+import { runGenerateAgent } from '../src/agent';
 
 /** Create a fake provider that returns canned responses in order. */
 function fakeProvider(responses: string[]): LlmProvider {
@@ -39,13 +39,13 @@ function makeOptions(overrides: Partial<OptimizeOptions> & { provider: LlmProvid
   };
 }
 
-describe('runOptimizeAgent', () => {
-  it('returns optimized instructions from a single LLM call', async () => {
+describe('runGenerateAgent', () => {
+  it('returns generated instructions from a single LLM call', async () => {
     const provider = fakeProvider([
       '## Golden Rules\n1. Always check types before committing.\n2. Run full test suite.',
     ]);
 
-    const result = await runOptimizeAgent(makeOptions({ provider }));
+    const result = await runGenerateAgent(makeOptions({ provider }));
     assert.ok(result.optimizedInstructions.includes('check types'));
     assert.ok(result.reasoning.length >= 1);
   });
@@ -56,11 +56,11 @@ describe('runOptimizeAgent', () => {
       name: 'counting',
       async chat(): Promise<string> {
         callCount++;
-        return 'optimized content';
+        return 'generated content';
       },
     };
 
-    await runOptimizeAgent(makeOptions({ provider }));
+    await runGenerateAgent(makeOptions({ provider }));
     assert.equal(callCount, 1);
   });
 
@@ -72,8 +72,8 @@ describe('runOptimizeAgent', () => {
       },
     };
 
-    const result = await runOptimizeAgent(makeOptions({ provider }));
-    // Should return original instructions as fallback
+    const result = await runGenerateAgent(makeOptions({ provider }));
+    // Should return fallback instructions
     assert.ok(result.optimizedInstructions.includes('Golden Rules'));
     assert.ok(result.reasoning.some((r) => r.includes('LLM error')));
   });
@@ -88,12 +88,12 @@ describe('runOptimizeAgent', () => {
       },
     };
 
-    await runOptimizeAgent(makeOptions({
+    await runGenerateAgent(makeOptions({
       provider,
       kbDiff: '+ Added new entry point: api.ts',
     }));
 
-    // The optimize call should include the diff
+    // The generate call should include the diff
     assert.equal(messages.length, 1);
     const userMsg = messages[0].find((m) => m.role === 'user');
     assert.ok(userMsg);
@@ -106,7 +106,7 @@ describe('runOptimizeAgent', () => {
 
     const provider = fakeProvider(['should not be called']);
 
-    const result = await runOptimizeAgent(makeOptions({
+    const result = await runGenerateAgent(makeOptions({
       provider,
       signal: controller.signal,
     }));
@@ -118,7 +118,7 @@ describe('runOptimizeAgent', () => {
     const steps: string[] = [];
     const provider = fakeProvider(['optimized']);
 
-    await runOptimizeAgent(makeOptions({
+    await runGenerateAgent(makeOptions({
       provider,
       onProgress: (step) => steps.push(step.kind),
     }));

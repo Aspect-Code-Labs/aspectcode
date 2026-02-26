@@ -5,7 +5,7 @@
 import * as assert from 'node:assert/strict';
 import {
   buildSystemPrompt,
-  buildOptimizePrompt,
+  buildGeneratePrompt,
   truncateKb,
 } from '../src/prompts';
 
@@ -28,30 +28,31 @@ describe('buildSystemPrompt', () => {
     const kb = '## Architecture\nHigh-risk files: app.ts';
     const prompt = buildSystemPrompt(kb);
     assert.ok(prompt.includes('High-risk files: app.ts'));
-    assert.ok(prompt.includes('instruction optimizer'));
+    assert.ok(prompt.includes('instruction author'));
   });
 
   it('includes role description', () => {
     const prompt = buildSystemPrompt('minimal kb');
     assert.ok(prompt.includes('expert AI coding assistant'));
+    assert.ok(prompt.includes('instruction author'));
   });
 });
 
-describe('buildOptimizePrompt', () => {
-  it('includes current instructions', () => {
-    const prompt = buildOptimizePrompt('## Golden Rules\n1. Follow types.');
-    assert.ok(prompt.includes('Golden Rules'));
-    assert.ok(prompt.includes('Follow types'));
+describe('buildGeneratePrompt', () => {
+  it('asks LLM to generate from scratch', () => {
+    const prompt = buildGeneratePrompt();
+    assert.ok(prompt.includes('Generate AGENTS.md'));
+    assert.ok(prompt.includes('from scratch'));
   });
 
   it('includes KB diff when provided', () => {
-    const prompt = buildOptimizePrompt('instructions content', '+ new hub: auth.ts');
+    const prompt = buildGeneratePrompt('+ new hub: auth.ts');
     assert.ok(prompt.includes('Recent KB Changes'));
     assert.ok(prompt.includes('new hub: auth.ts'));
   });
 
   it('omits diff section when not provided', () => {
-    const prompt = buildOptimizePrompt('instructions content');
+    const prompt = buildGeneratePrompt();
     assert.ok(!prompt.includes('Recent KB Changes'));
   });
 });

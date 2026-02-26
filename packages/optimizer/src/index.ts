@@ -23,10 +23,10 @@ export { createOpenAiProvider } from './providers/openai';
 export { createAnthropicProvider } from './providers/anthropic';
 export { withRetry } from './providers/retry';
 export type { RetryOptions } from './providers/retry';
-export { runOptimizeAgent, runComplaintAgent } from './agent';
+export { runGenerateAgent, runComplaintAgent } from './agent';
 export {
   buildSystemPrompt,
-  buildOptimizePrompt,
+  buildGeneratePrompt,
   truncateKb,
   buildComplaintPrompt,
   parseComplaintResponse,

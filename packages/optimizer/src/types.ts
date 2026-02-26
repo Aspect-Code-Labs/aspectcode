@@ -47,10 +47,13 @@ export interface OptLogger {
   debug(msg: string): void;
 }
 
-/** Options for a single optimization run. */
+/** Options for a single generation run. */
 export interface OptimizeOptions {
-  /** Current AGENTS.md content. */
-  currentInstructions: string;
+  /**
+   * Fallback content returned when the LLM call fails or is cancelled.
+   * When omitted, an empty string is used as the fallback.
+   */
+  currentInstructions?: string;
 
   /** Full KB content (architecture + map + context). */
   kb: string;

@@ -1,27 +1,30 @@
 /**
- * Optimization agent — generates optimized AGENTS.md instructions.
+ * Generation agent — generates AGENTS.md from scratch using static analysis.
  *
- * Single-pass: one LLM call produces the optimized instructions.
+ * Single-pass: one LLM call produces the instructions content.
+ * The KB (static analysis) is provided as context in the system prompt.
  * Quality assessment is handled externally by the evaluator package
  * (@aspectcode/evaluator) via probe-based testing:
- *   optimize (1 call) → probe-test → diagnose → apply edits
+ *   generate (1 call) → probe-test → diagnose → apply edits
  */
 
 import type { ChatMessage, OptimizeOptions, OptimizeResult, ComplaintOptions, ComplaintResult } from './types';
 import {
   buildSystemPrompt,
-  buildOptimizePrompt,
+  buildGeneratePrompt,
   buildComplaintPrompt,
   parseComplaintResponse,
 } from './prompts';
 
 /**
- * Run the optimization agent — single-pass LLM generation.
+ * Run the generation agent — single-pass LLM generation.
  *
- * Generates optimized AGENTS.md content in one call.
+ * Generates AGENTS.md content from scratch using the KB (static analysis)
+ * as context. The LLM sees the full knowledge base in the system prompt
+ * and produces codebase-specific instructions in one call.
  * The evaluator package handles quality feedback externally.
  */
-export async function runOptimizeAgent(options: OptimizeOptions): Promise<OptimizeResult> {
+export async function runGenerateAgent(options: OptimizeOptions): Promise<OptimizeResult> {
   const {
     currentInstructions,
     kb,
@@ -34,33 +37,36 @@ export async function runOptimizeAgent(options: OptimizeOptions): Promise<Optimi
     onProgress,
   } = options;
 
+  // Fallback content when we can't generate (cancellation / LLM error).
+  const fallback = currentInstructions ?? '';
+
   if (signal?.aborted) {
-    log?.info('Optimization cancelled.');
+    log?.info('Generation cancelled.');
     return {
-      optimizedInstructions: currentInstructions,
+      optimizedInstructions: fallback,
       reasoning: ['Cancelled by user'],
     };
   }
 
   const systemPrompt = buildSystemPrompt(kb, kbCharBudget, toolInstructions);
 
-  // ── Generate optimized candidate ──────────────────────────
+  // ── Generate instructions from scratch ────────────────────────
   onProgress?.({ kind: 'generating', detail: 'generating AGENTS.md…' });
-  log?.info('Generating optimized AGENTS.md…');
+  log?.info('Generating AGENTS.md from static analysis…');
 
-  const optimizeMessages: ChatMessage[] = [
+  const generateMessages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: buildOptimizePrompt(currentInstructions, kbDiff) },
+    { role: 'user', content: buildGeneratePrompt(kbDiff) },
   ];
 
   let candidate: string;
   try {
-    candidate = await provider.chat(optimizeMessages);
+    candidate = await provider.chat(generateMessages);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log?.error(`LLM call failed: ${msg}`);
     return {
-      optimizedInstructions: currentInstructions,
+      optimizedInstructions: fallback,
       reasoning: [`LLM error — ${msg}`],
     };
   }
@@ -70,7 +76,7 @@ export async function runOptimizeAgent(options: OptimizeOptions): Promise<Optimi
 
   return {
     optimizedInstructions: candidate,
-    reasoning: ['Single-pass generation complete'],
+    reasoning: ['Single-pass generation from static analysis complete'],
   };
 }
 

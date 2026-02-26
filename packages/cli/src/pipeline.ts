@@ -4,10 +4,11 @@
  * 1. Discover files → tree-sitter analysis
  * 2. Build KB in memory (architecture + map + context)
  * 3. Scan & read other AI tool instruction files as context
- * 4. If API key present → optimize via LLM → write AGENTS.md
- *    If no API key → write static AGENTS.md + warn
- * 5. If --kb flag → also write kb.md
- * 6. If not --once → watch for changes and repeat
+ * 4. Write static-template AGENTS.md for immediate feedback
+ * 5. If API key present → LLM generates AGENTS.md from KB → overwrite
+ *    If no API key → keep static AGENTS.md + warn
+ * 6. If --kb flag → also write kb.md
+ * 7. If not --once → watch for changes and repeat
  */
 
 import * as path from 'path';
@@ -101,9 +102,9 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
     log.debug(`Read ${toolInstructions.size} AI tool instruction file(s) as context`);
   }
 
-  // ── 5. Generate base AGENTS.md from static analysis ─────
-  //    Write it to disk immediately so the user sees output early,
-  //    even before the LLM optimization pass finishes.
+  // ── 5. Write static-template AGENTS.md for immediate feedback ─
+  //    Written to disk right away so the user sees output early,
+  //    even before the LLM generation finishes.
   const baseContent = generateCanonicalContentForMode('safe', kbContent.length > 0);
   if (!flags.dryRun) {
     await writeAgentsMd(host, root, baseContent, ownership);
@@ -111,11 +112,11 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
     log.debug('Base AGENTS.md written from static analysis');
   }
 
-  // ── 6. Optimize or fallback ───────────────────────────────
+  // ── 6. LLM generation or static fallback ───────────────
   store.setPhase('optimizing');
   const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config, baseContent);
 
-  // ── 7. Write optimized AGENTS.md ──────────────────────────
+  // ── 7. Write LLM-generated AGENTS.md ───────────────────
   store.setPhase('writing');
   if (flags.dryRun) {
     log.info(fmt.bold('Dry run — proposed AGENTS.md:'));
@@ -125,7 +126,7 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   } else {
     await writeAgentsMd(host, root, optimizeResult.content, ownership);
     const modeLabel = ownership === 'section' ? ' (section)' : '';
-    const verb = optimizeResult.reasoning.length > 0 ? 'optimized' : 'written';
+    const verb = optimizeResult.reasoning.length > 0 ? 'generated' : 'written';
     store.addOutput(`AGENTS.md ${verb}${modeLabel}`);
     log.success(`AGENTS.md ${verb}${modeLabel}`);
   }
