@@ -4,15 +4,17 @@
  * 1. Discover files → tree-sitter analysis
  * 2. Build KB in memory (architecture + map + context)
  * 3. Scan & read other AI tool instruction files as context
- * 4. If API key present → optimize via LLM → write AGENTS.md
- *    If no API key → write static AGENTS.md + warn
- * 5. If --kb flag → also write kb.md
- * 6. If not --once → watch for changes and repeat
+ * 4. Write static-template AGENTS.md for immediate feedback
+ * 5. If API key present → LLM generates AGENTS.md from KB → overwrite
+ *    If no API key → keep static AGENTS.md + warn
+ * 6. If --kb flag → also write kb.md
+ * 7. If not --once → watch for changes and repeat
  */
 
+import * as fs from 'fs';
 import * as path from 'path';
 import { SUPPORTED_EXTENSIONS, analyzeRepoWithDependencies } from '@aspectcode/core';
-import { createNodeEmitterHost } from '@aspectcode/emitters';
+import { createNodeEmitterHost, generateCanonicalContentForMode } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import { ExitCode } from './cli';
 import type { ExitCodeValue } from './cli';
@@ -27,6 +29,8 @@ import { tryOptimize } from './optimize';
 import { processComplaints } from './complaintProcessor';
 import { selectPrompt } from './ui/prompts';
 import { store } from './ui/store';
+import { summarizeContent } from './summary';
+import { diffSummary } from './diffSummary';
 
 // ── Watch constants ──────────────────────────────────────────
 
@@ -66,6 +70,13 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   store.setRunStartMs(startMs);
   store.addSetupNote(config ? 'config loaded' : 'no config');
 
+  // ── First-run detection ───────────────────────────────────
+  const agentsPath = path.join(root, 'AGENTS.md');
+  const configPath = path.join(root, 'aspectcode.json');
+  if (!fs.existsSync(agentsPath) && !fs.existsSync(configPath)) {
+    store.setFirstRun(true);
+  }
+
   // ── 1. Discover & read files ──────────────────────────────
   store.setPhase('discovering');
   const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet, spin: ctx.spin });
@@ -101,26 +112,54 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
     log.debug(`Read ${toolInstructions.size} AI tool instruction file(s) as context`);
   }
 
-  // ── 5. Optimize or fallback ───────────────────────────────
-  store.setPhase('optimizing');
-  const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config);
+  // ── 5. Write static-template AGENTS.md for immediate feedback ─
+  //    Written to disk right away so the user sees output early,
+  //    even before the LLM generation finishes.
+  const baseContent = generateCanonicalContentForMode('safe', kbContent.length > 0);
+  if (!flags.dryRun) {
+    await writeAgentsMd(host, root, baseContent, ownership);
+    store.addOutput('AGENTS.md written (base)');
+    log.debug('Base AGENTS.md written from static analysis');
+  }
 
-  // ── 6. Write AGENTS.md ────────────────────────────────────
+  // ── 6. LLM generation or static fallback ───────────────
+  store.setPhase('optimizing');
+  const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config, baseContent);
+
+  // ── 7. Write LLM-generated AGENTS.md ───────────────────
   store.setPhase('writing');
   if (flags.dryRun) {
     log.info(fmt.bold('Dry run — proposed AGENTS.md:'));
     log.blank();
-    console.log(optimizeResult.content);
+    log.info(optimizeResult.content);
     log.blank();
   } else {
+    // Compute diff before overwriting (for watch-mode change summary)
+    let previousContent: string | undefined;
+    try {
+      if (fs.existsSync(agentsPath)) {
+        previousContent = fs.readFileSync(agentsPath, 'utf-8');
+      }
+    } catch { /* ignore read errors */ }
+
     await writeAgentsMd(host, root, optimizeResult.content, ownership);
     const modeLabel = ownership === 'section' ? ' (section)' : '';
-    const verb = optimizeResult.reasoning.length > 0 ? 'updated' : 'written';
+    const verb = optimizeResult.reasoning.length > 0 ? 'generated' : 'written';
     store.addOutput(`AGENTS.md ${verb}${modeLabel}`);
     log.success(`AGENTS.md ${verb}${modeLabel}`);
+
+    // Diff summary (skip on first write when previous was just the base template)
+    if (previousContent !== undefined && previousContent !== baseContent) {
+      const diff = diffSummary(previousContent, optimizeResult.content);
+      store.setDiffSummary(diff);
+    }
+
+    // Content summary for the dashboard
+    const summary = summarizeContent(optimizeResult.content);
+    store.setSummary(summary);
   }
 
-  // ── 7. Optionally write kb.md ─────────────────────────────
+  // ── 8. Optionally write kb.md ─────────────────────────────
   if (flags.kb && !flags.dryRun) {
     await writeKbMd(host, root, kbContent);
     store.addOutput('kb.md written');

@@ -13,6 +13,18 @@ export interface ChatMessage {
   content: string;
 }
 
+/** Token usage from a single LLM call. */
+export interface ChatUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Result from an LLM call that includes optional token usage. */
+export interface ChatResult {
+  content: string;
+  usage?: ChatUsage;
+}
+
 /**
  * Provider-agnostic LLM interface.
  *
@@ -25,6 +37,12 @@ export interface LlmProvider {
 
   /** Send a chat completion request and return the assistant reply. */
   chat(messages: ChatMessage[]): Promise<string>;
+
+  /**
+   * Send a chat completion request and return the reply with token usage.
+   * Optional — providers that don't implement this fall back to `chat()`.
+   */
+  chatWithUsage?(messages: ChatMessage[]): Promise<ChatResult>;
 }
 
 /** Options passed to provider factory functions. */
@@ -47,10 +65,13 @@ export interface OptLogger {
   debug(msg: string): void;
 }
 
-/** Options for a single optimization run. */
+/** Options for a single generation run. */
 export interface OptimizeOptions {
-  /** Current AGENTS.md content. */
-  currentInstructions: string;
+  /**
+   * Fallback content returned when the LLM call fails or is cancelled.
+   * When omitted, an empty string is used as the fallback.
+   */
+  currentInstructions?: string;
 
   /** Full KB content (architecture + map + context). */
   kb: string;
@@ -61,45 +82,31 @@ export interface OptimizeOptions {
   /** Concatenated content from other AI tool instruction files (read-only context). */
   toolInstructions?: string;
 
-  /** Maximum agent iterations (optimize → eval → refine). */
-  maxIterations: number;
-
   /** LLM provider to use. */
   provider: LlmProvider;
 
   /** Optional logger for progress reporting. */
   log?: OptLogger;
 
-  /** Minimum eval score (1–10) to accept a candidate without further iteration. Default: 8. */
-  acceptThreshold?: number;
-
   /** AbortSignal for cooperative cancellation. */
   signal?: AbortSignal;
-
-  /** Delay in ms between iterations to avoid rate limiting. Default: 0. */
-  iterationDelayMs?: number;
 
   /** Character budget for KB content in prompts. Default: 60000. */
   kbCharBudget?: number;
 
   /**
-   * Feedback from the evaluator package (probe test results).
-   * When provided, this replaces or supplements the self-eval loop.
-   * Formatted as a human-readable summary of probe failures and diagnosis.
+   * Progress callback invoked at each meaningful step inside the agent.
+   * Useful for updating a CLI dashboard or progress bar.
    */
-  evaluatorFeedback?: string;
+  onProgress?: (step: OptimizeStep) => void;
 }
 
-/** Self-evaluation result from one iteration. */
-export interface EvalResult {
-  /** Quality score 1–10. */
-  score: number;
-
-  /** Free-text feedback on the candidate. */
-  feedback: string;
-
-  /** Concrete improvement suggestions. */
-  suggestions: string[];
+/** Progress step emitted by the optimization agent via `onProgress`. */
+export interface OptimizeStep {
+  /** Which sub-step is running. */
+  kind: 'generating' | 'done';
+  /** Optional human-readable detail. */
+  detail?: string;
 }
 
 /** Final result of the optimization agent. */
@@ -107,11 +114,11 @@ export interface OptimizeResult {
   /** The optimized instructions content (to be placed between markers). */
   optimizedInstructions: string;
 
-  /** Number of iterations actually executed. */
-  iterations: number;
-
-  /** Per-iteration reasoning / eval feedback. */
+  /** Human-readable reasoning / status messages. */
   reasoning: string[];
+
+  /** Aggregate token usage across all LLM calls in this run. */
+  usage?: ChatUsage;
 }
 
 // ── Environment / config ────────────────────────────────────

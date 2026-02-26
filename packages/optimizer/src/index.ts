@@ -7,10 +7,12 @@
 export type {
   LlmProvider,
   ChatMessage,
+  ChatUsage,
+  ChatResult,
   ProviderOptions,
   OptimizeOptions,
   OptimizeResult,
-  EvalResult,
+  OptimizeStep,
   OptLogger,
   ProviderName,
   ComplaintOptions,
@@ -23,12 +25,10 @@ export { createOpenAiProvider } from './providers/openai';
 export { createAnthropicProvider } from './providers/anthropic';
 export { withRetry } from './providers/retry';
 export type { RetryOptions } from './providers/retry';
-export { runOptimizeAgent, runComplaintAgent } from './agent';
+export { runGenerateAgent, runComplaintAgent } from './agent';
 export {
   buildSystemPrompt,
-  buildOptimizePrompt,
-  buildEvalPrompt,
-  parseEvalResponse,
+  buildGeneratePrompt,
   truncateKb,
   buildComplaintPrompt,
   parseComplaintResponse,

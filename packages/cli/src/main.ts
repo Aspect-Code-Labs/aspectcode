@@ -13,6 +13,7 @@ import { createLogger, createSpinner, disableColor, fmt } from './logger';
 import { getVersion } from './version';
 import { runPipeline, resolveOwnership } from './pipeline';
 import { createDashboardLogger, createDashboardSpinner } from './ui/inkLogger';
+import { store } from './ui/store';
 import type { PipelinePhase } from './ui/store';
 
 // ── Build lookup tables from FLAG_DEFS ───────────────────────
@@ -36,6 +37,7 @@ export function parseArgs(argv: string[]): CliFlags {
     dryRun: false,
     once: false,
     noColor: false,
+    compact: false,
   };
 
   const args = argv.slice(2); // skip node + script
@@ -83,13 +85,13 @@ function printHelp(): void {
   }
 
   console.log(`
-${fmt.bold('aspectcode')} — optimize AGENTS.md for your codebase
+${fmt.bold('aspectcode')} — generate AGENTS.md for your codebase
 
 ${fmt.bold('USAGE')}
   aspectcode [options]
 
   Analyzes your codebase, builds a knowledge base, reads existing AI tool
-  instruction files for context, optimizes AGENTS.md via LLM (when API key
+  instruction files for context, generates AGENTS.md via LLM (when API key
   is available), and watches for changes.
 
 ${fmt.bold('OPTIONS')}
@@ -101,16 +103,11 @@ ${fmt.bold('EXAMPLES')}
   aspectcode --once --kb          ${fmt.dim('# also write kb.md')}
   aspectcode --once --dry-run     ${fmt.dim('# preview without writing')}
   aspectcode --provider openai    ${fmt.dim('# force specific LLM provider')}
+  aspectcode --compact            ${fmt.dim('# minimal dashboard layout')}
 `.trimStart());
 }
 
 // ── Number-parsing helpers ───────────────────────────────────
-
-function parseIntFlag(value: unknown, min: number, max: number, fallback: number): number {
-  if (typeof value !== 'string') return fallback;
-  const n = parseInt(value, 10);
-  return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
-}
 
 function parseFloatFlag(value: unknown, min: number, max: number): number | undefined {
   if (typeof value !== 'string') return undefined;
@@ -141,12 +138,6 @@ async function main(): Promise<void> {
   }
 
   // Parse numeric string flags
-  if (typeof flags.maxIterations === 'string') {
-    flags.maxIterations = parseIntFlag(flags.maxIterations, 1, 20, 3);
-  }
-  if (typeof flags.acceptThreshold === 'string') {
-    flags.acceptThreshold = parseIntFlag(flags.acceptThreshold, 1, 10, 8);
-  }
   if (typeof flags.temperature === 'string') {
     flags.temperature = parseFloatFlag(flags.temperature, 0, 2);
   }
@@ -164,14 +155,21 @@ async function main(): Promise<void> {
   let unmount: (() => void) | undefined;
 
   if (useDashboard) {
+    // Set compact mode before mounting dashboard
+    if (flags.compact) {
+      store.setCompact(true);
+    }
+
     // ink-based dashboard mode
     log = createDashboardLogger();
     spin = (msg: string, phase?: string) =>
       createDashboardSpinner((phase ?? 'idle') as PipelinePhase, msg);
 
     try {
-      // Clear terminal for a clean dashboard — removes ownership prompt artifacts
-      process.stdout.write('\x1bc');
+      // Clear screen content but preserve scrollback (avoids Ink re-render desync
+      // that \x1bc causes — that sends a full terminal reset which confuses Ink's
+      // cursor tracking and causes the banner to be reprinted on every render).
+      process.stdout.write('\x1B[2J\x1B[H');
 
       const { render } = await import('ink');
       const React = await import('react');
