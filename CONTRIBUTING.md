@@ -8,26 +8,21 @@ Thanks for your interest in contributing to Aspect Code!
 # From repo root — installs all workspace packages
 npm install
 
-# Build all packages (core → emitters → optimizer → cli → extension)
+# Build all packages (core → emitters → optimizer → evaluator → cli)
 npm run build --workspaces
-cd extension && npm run build && cd ..
 
 # Run all tests
 npm test --workspaces
 ```
 
-Open the repo root in VS Code, press **F5** to launch the Extension
-Development Host.
-
 ## Repository Structure
 
 ```
-packages/core/        @aspectcode/core        Pure analysis (no vscode)
+packages/core/        @aspectcode/core        Static analysis engine
 packages/emitters/    @aspectcode/emitters    Artifact generation
 packages/evaluator/   @aspectcode/evaluator   Evidence-based evaluation
 packages/optimizer/   @aspectcode/optimizer   LLM-based optimization
 packages/cli/         aspectcode              CLI entry point
-extension/                                    VS Code extension (thin launcher)
 docs/                                         Architecture & guides
 ```
 
@@ -42,21 +37,6 @@ Full architecture: [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)
 | `npm install` | Install all workspace dependencies |
 | `npm run build --workspaces` | Build core → emitters → optimizer → evaluator → cli |
 | `npm test --workspaces` | Run all package tests |
-
-### Extension (`cd extension`)
-
-| Command | What it does |
-|---------|-------------|
-| `npm run build` | Build the extension with esbuild |
-| `npm run watch` | Rebuild on file changes |
-| `npm run typecheck` | Run `tsc --noEmit` |
-| `npm run lint` | Run ESLint |
-| `npm run lint:fix` | Run ESLint with auto-fix |
-| `npm run format` | Format all source files with Prettier |
-| `npm run format:check` | Check formatting (CI uses this) |
-| `npm run check:filesize` | Check file size limits |
-| `npm run check:boundaries` | Check dependency boundary rules |
-| `npm run check:all` | Run all checks (lint + format + filesize + boundaries) |
 
 ### Any package (`cd packages/core`, etc.)
 
@@ -86,7 +66,7 @@ You can also run the script directly for extra options:
 .\scripts\test-cli-sandbox.ps1 -SkipBuild -SkipCleanup
 ```
 
-The sandbox script copies `extension/test/fixtures/mini-repo` into a
+The sandbox script copies a fixture repo into a
 temp directory and runs CLI commands (`--once`, `--once --kb`,
 `--once --dry-run`, `--no-color`, etc.) with explicit `--root` flags
 pointing there. It verifies the repo root stays clean.
@@ -94,9 +74,6 @@ pointing there. It verifies the repo root stays clean.
 **For agents / AI coding assistants:** When testing the CLI, always
 pass `--root <path>` pointing to a temp copy of the fixture repo.
 Never run `aspectcode` from the repo root without explicit flags.
-
-The VS Code task **"Aspect Code: Test CLI (sandbox)"** is also
-available from the Command Palette (Tasks: Run Task).
 
 ### Multi-Repo Testing
 
@@ -135,8 +112,6 @@ Aspect Code uses three CI tiers:
 - **Main CI (`.github/workflows/ci.yml`)** — runs on every push to `main` and every PR
   - Builds and tests all packages (core, emitters, evaluator, optimizer, cli)
   - Bundled-dependency check for CLI (`check:bundled`)
-  - Extension typecheck, lint, format, filesize, boundaries, build
-  - Parser parity check (`extension/parsers/` ↔ `packages/core/parsers/`)
 - **PR CI (`.github/workflows/ci-pr.yml`)**
   - Windows: sandbox CLI smoke tests (`test:cli:fast`)
 - **Nightly CI (`.github/workflows/nightly-cli-repos.yml`)**
@@ -175,25 +150,10 @@ Versioning and publishing is automated via [changesets](https://github.com/chang
 
 To check the current changeset status: `npm run changeset:status`
 
-### VS Code extension
-
-The extension is versioned independently and published manually:
-
-```bash
-cd extension
-npx @vscode/vsce package          # produces .vsix
-npx @vscode/vsce publish          # publishes to Marketplace
-```
-
 ### Parser WASM files
 
-Tree-sitter WASM files exist in two places:
-- `extension/parsers/` — shipped inside the VSIX
-- `packages/core/parsers/` — shipped inside the npm package
-
-These must always be identical. CI enforces this via
-`node scripts/check-parser-parity.mjs`. When updating parsers, copy the
-files to both directories.
+Tree-sitter WASM files are shipped in `packages/core/parsers/` inside
+the npm package.
 
 ## What to Work On
 
@@ -211,10 +171,9 @@ Read **[docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md)** and
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** before making changes.
 Key rules:
 
-1. **Package boundaries:** `core` has no `vscode` import. `emitters` depends
-   only on `core`. `optimizer` depends on `core` + `emitters`. `evaluator`
-   depends on `core` + `optimizer`. `cli` depends on all four. Extension
-   spawns CLI as subprocess.
+1. **Package boundaries:** `core` has no external runtime deps beyond tree-sitter.
+   `emitters` depends only on `core`. `optimizer` has LLM SDKs.
+   `evaluator` depends on `core` + `optimizer`. `cli` depends on all four.
 2. **File size limit:** New files must be ≤ 400 lines.
 3. **Formatting:** All code is formatted with Prettier. Run `npm run format`
    before committing.
@@ -230,7 +189,6 @@ Key rules:
 - Add/update tests when there's a clear place to do so.
 - Avoid reformatting unrelated code (Prettier handles formatting; don't
   mix style changes with logic changes).
-- Run `npm run check:all` (in `extension/`) before pushing.
 - CI must pass before merge.
 
 ## License

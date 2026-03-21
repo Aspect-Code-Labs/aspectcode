@@ -6,11 +6,11 @@
 
 ## Overview
 
-Aspect Code generates a project-local knowledge base (`.aspect/` directory)
-that helps AI coding assistants understand a codebase before making changes.
-It produces KB files (opt-in via `--kb` flag), an `AGENTS.md` instruction file
-(full-file ownership, no markers), and optionally optimizes `AGENTS.md` via
-an agentic LLM loop.
+Aspect Code generates a project-local knowledge base and `AGENTS.md`
+instruction file that helps AI coding assistants understand a codebase
+before making changes. It produces KB content (opt-in via `--kb` flag),
+an `AGENTS.md` instruction file, and optionally optimizes `AGENTS.md`
+via LLM generation with probe-based evaluation.
 
 **Everything runs offline** by default. There are no network calls, no telemetry,
 no phone-home checks. WASM grammars ship in-repo; all analysis is local.
@@ -23,23 +23,17 @@ The only network usage is the opt-in LLM optimizer (requires API key).
 ```
 aspectcode/                         ← npm workspaces root
 ├── packages/
-│   ├── core/       @aspectcode/core        Pure analysis (no vscode)
+│   ├── core/       @aspectcode/core        Static analysis engine
 │   ├── emitters/   @aspectcode/emitters    Artifact generation
 │   ├── evaluator/  @aspectcode/evaluator   Evidence-based evaluation
 │   ├── optimizer/  @aspectcode/optimizer   LLM-based optimization
 │   └── cli/        aspectcode              CLI entry point (npm package)
-├── extension/                              VS Code extension (thin launcher)
 └── docs/                                   This file, guides
 ```
 
 ### Dependency Graph
 
 ```
-  ┌─────────────┐
-  │  extension   │──spawns──▶ aspectcode (subprocess)
-  │  (VS Code)   │
-  └─────────────┘
-        │
   ┌─────────────┐
   │     cli      │──uses──▶ @aspectcode/core
   │  (Node.js)   │──uses──▶ @aspectcode/emitters
@@ -56,10 +50,8 @@ aspectcode/                         ← npm workspaces root
 ```
 
 **Rule:** `core` has zero knowledge of `emitters`, `evaluator`, `optimizer`,
-`cli`, or `extension`. `emitters` depends on `core` only. `optimizer` depends
-on `core` + `emitters`. `evaluator` depends on `core` + `optimizer`. `cli`
-depends on all four. `extension` spawns the CLI as a subprocess — no direct
-package imports.
+or `cli`. `emitters` depends on `core` only. `evaluator` depends on `core`
++ `optimizer`. `cli` depends on all four.
 
 ---
 
@@ -67,8 +59,7 @@ package imports.
 
 ### @aspectcode/core
 
-Pure TypeScript. No `vscode` import, no Node-specific I/O beyond
-`fs` and `path`. Target: ES2020 / CommonJS.
+Pure TypeScript analysis engine. Target: ES2020 / CommonJS.
 
 | Export | Purpose |
 |--------|---------|
@@ -87,15 +78,14 @@ Key types: `AnalysisModel`, `AnalyzedFile`, `GraphEdge`, `HubMetric`,
 ### @aspectcode/emitters
 
 Artifact generation. Depends on `@aspectcode/core` for model types and
-stats. No `vscode` import. Target: ES2020 / CommonJS.
+stats. Target: ES2020 / CommonJS.
 
 | Export | Purpose |
 |--------|---------|
 | `runEmitters(model, host, opts)` | Orchestrate all emitters → `EmitReport` |
 | `createNodeEmitterHost()` | Node fs-backed `EmitterHost` |
 | `createKBEmitter()` | KB content builder (architecture/map/context) |
-| `createInstructionsEmitter()` | AGENTS.md instruction file emitter (full-file ownership) |
-| `stableStringify(value)` | Deterministic JSON (sorted keys) |
+| `createInstructionsEmitter()` | AGENTS.md instruction file emitter |
 | `GenerationTransaction` | Atomic writes — temp files → rename, manifest last |
 
 Key types: `EmitterHost`, `EmitOptions`, `EmitReport`, `Emitter`,
@@ -103,41 +93,43 @@ Key types: `EmitterHost`, `EmitOptions`, `EmitReport`, `Emitter`,
 
 ### @aspectcode/optimizer
 
-LLM-based optimization for AGENTS.md content. Uses an agentic loop:
-evaluate current content → generate improvements → accept if quality
-threshold met.
+LLM-based generation for AGENTS.md content.
 
 | Export | Purpose |
 |--------|---------|
-| `createAgent()` | Create an optimizer agent with configurable provider/model |
-| Providers | OpenAI and Anthropic adapters |
+| `runGenerateAgent(opts)` | Single-pass LLM generation from KB |
+| `runComplaintAgent(opts)` | Apply user complaints to AGENTS.md |
+| `resolveProvider(env, opts)` | Resolve OpenAI or Anthropic provider |
 
-Key types: `OptimizerOptions`, `AgentResult`.
+Key types: `LlmProvider`, `OptimizeOptions`, `OptimizeResult`.
 
 ### @aspectcode/evaluator
 
 Evidence-based evaluation for generated content. Harvests real prompts
-from local AI tool logs (Claude Code, Cline, Aider, VS Code Copilot),
-runs probe-based micro-tests against KB content, and diagnoses failures
-with targeted fixes.
+from local AI tool logs (Claude Code, Cline, Aider, Copilot),
+runs probe-based micro-tests against generated content, and diagnoses
+failures with targeted fixes.
 
 | Export | Purpose |
 |--------|---------|
-| `evaluate(model, content, opts)` | Run probes against generated content |
+| `evaluate(opts)` | Run full evaluation pipeline |
 | `harvestPrompts(root)` | Collect prompts from local AI tool logs |
+| `generateProbes(opts)` | Generate probe micro-tests from KB |
+| `runProbes(content, probes, provider)` | Execute probes against content |
+| `diagnose(failures, content, provider)` | Analyze failures and propose fixes |
 | `applyDiagnosisEdits(content, diagnosis)` | Apply diagnostic fixes to content |
 
-Key types: `HarvestedPrompt`, `PromptSource`.
+Key types: `Probe`, `ProbeResult`, `HarvestedPrompt`, `Diagnosis`.
 
 ### aspectcode (CLI)
 
-Node.js command-line interface. Depends on `core`, `emitters`, `evaluator`,
-and `optimizer`. No subcommands — single command with flags.
+Node.js command-line interface. Depends on all four packages.
+No subcommands — single command with flags.
 
 **Usage:** `aspectcode [options]`
 
-The pipeline: discover files → analyze → build KB in memory → emit
-artifacts → optimize AGENTS.md (if API key available) → watch for changes.
+The pipeline: discover files → analyze → build KB in memory →
+optimize AGENTS.md (if API key available) → watch for changes.
 
 | Flag | Short | Purpose |
 |------|-------|---------|
@@ -152,19 +144,10 @@ artifacts → optimize AGENTS.md (if API key available) → watch for changes.
 | `--no-color` | | Disable colored output |
 | `--provider <name>` | `-p` | LLM provider: `openai` or `anthropic` |
 | `--model <name>` | `-m` | LLM model override |
-| `--max-iterations <n>` | `-n` | Max LLM agent iterations (default: 3) |
-| `--accept-threshold <n>` | | Min eval score to accept (1–10, default: 8) |
 | `--temperature <n>` | | Sampling temperature (0–2) |
+| `--compact` | | Compact dashboard (no banner) |
 
 Config file: `aspectcode.json`.
-
-### extension/
-
-VS Code extension. Ultra-thin launcher: resolves the CLI binary,
-spawns `aspectcode` as a subprocess in watch mode, and provides
-Start/Stop commands in the Command Palette plus a status bar indicator.
-
-Single source file: `extension/src/extension.ts`.
 
 ---
 
@@ -178,13 +161,11 @@ aspectcode --once
   ├─ 1. discoverFiles(root)              @aspectcode/core
   ├─ 2. read file contents               Node built-in
   ├─ 3. analyzeRepo(root, fileMap)        @aspectcode/core
-  ├─ 4. runEmitters(model, host, opts)    @aspectcode/emitters
-  │    ├─ KB emitter → .aspect/ (when --kb)
-  │    └─ Instructions emitter → AGENTS.md (full-file ownership)
+  ├─ 4. build KB content in memory        @aspectcode/emitters
   ├─ 5. evaluator (when enabled)          @aspectcode/evaluator
   │    └─ harvest prompts → run probes → diagnose → apply fixes
   └─ 6. optimizer (when API key present)  @aspectcode/optimizer
-       └─ evaluate → improve → accept loop on AGENTS.md
+       └─ single-pass LLM generation from KB
 ```
 
 ### CLI Pipeline (watch mode, default)
@@ -198,29 +179,17 @@ aspectcode
        └─ keep process alive until SIGINT/SIGTERM
 ```
 
-### Extension Pipeline
-
-```
-User clicks Start (or auto-start on activation)
-  │
-  └─ extension.ts → spawn `aspectcode` subprocess (watch mode)
-     └─ CLI runs its pipeline, watches, auto-updates
-```
-
 ---
 
 ## File Outputs
 
 | File | Source | Content |
 |------|--------|---------|
-| `.aspect/architecture.md` | KB emitter | Hub files, directory tree, entry points |
-| `.aspect/map.md` | KB emitter | Data models, symbol index, conventions |
-| `.aspect/context.md` | KB emitter | Module clusters, integrations, data flow |
-| `.aspect/manifest.json` | Manifest writer | Schema version, stats, file list |
-| `AGENTS.md` | Instructions emitter | AI agent instructions (full-file ownership) |
+| `AGENTS.md` | Instructions emitter | AI agent instructions |
+| `kb.md` | KB emitter (--kb flag) | Architecture, map, context |
 
-`AGENTS.md` is fully owned by Aspect Code — the entire file is overwritten
-on each generation. No markers are used.
+`AGENTS.md` supports two ownership modes: `full` (overwrite entire file)
+and `section` (preserve user content outside markers).
 
 ---
 
@@ -240,11 +209,10 @@ This prevents partial/corrupt output if a write fails mid-generation.
 
 | Concern | How it's handled |
 |---------|-----------------|
-| Tree-sitter WASM | `.wasm` files committed in `extension/parsers/` and `packages/core/parsers/` |
+| Tree-sitter WASM | `.wasm` files committed in `packages/core/parsers/` |
 | NPM packages | root `package-lock.json`; `npm ci --prefer-offline` works |
-| Build tools | `tsc`, `esbuild`, `mocha` — all local binaries |
+| Build tools | `tsc`, `mocha` — all local binaries |
 | Telemetry | None. Zero network calls (except opt-in optimizer) |
-| VSIX packaging | `parsers/` included via `.vscodeignore` allowlist |
 
 ---
 

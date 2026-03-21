@@ -5,7 +5,6 @@
 **Give your AI coding assistant a map before it writes a single line.**
 
 [![npm](https://img.shields.io/npm/v/aspectcode)](https://www.npmjs.com/package/aspectcode)
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/aspectcode.aspectcode)](https://marketplace.visualstudio.com/items?itemName=aspectcode.aspectcode)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
 Aspect Code analyzes your codebase and generates `AGENTS.md` — the instruction
@@ -29,10 +28,8 @@ the LLM generation step (requires your own API key).
 ## Install
 
 ```bash
-npm install -g aspectcode          # CLI
+npm install -g aspectcode
 ```
-
-Or install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=aspectcode.aspectcode). Both produce identical output.
 
 ## How It Works
 
@@ -78,7 +75,6 @@ packages/
   evaluator/   @aspectcode/evaluator    Probe-based evaluation
   optimizer/   @aspectcode/optimizer    LLM generation
   cli/         aspectcode               CLI
-extension/                              VS Code extension
 ```
 
 ## Development
