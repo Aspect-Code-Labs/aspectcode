@@ -1,23 +1,14 @@
 /**
- * Dashboard — condensed ink-based CLI dashboard.
+ * Dashboard — ink-based CLI dashboard with real-time change assessments.
  *
- * Layout (full mode):
- *   Banner                         (hidden in compact mode)
- *   First-run message              (only on first run, early phases)
- *   Setup notes                    (compact single line)
- *   Status line                    (spinner/icon + phase + stats)
- *   Eval progress                  (harvest → probes → diagnosis)
- *   Token usage                    (after LLM generation)
- *   Summary card                   (after writing — sections, rules, paths)
- *   Diff summary                   (watch-mode: +N lines, -M lines)
- *   [Detail]                       (change trigger, warning, reasoning)
- *
- * Layout (compact mode):
- *   Same but no banner, no reasoning, setup only if warning.
+ * v2 layout:
+ *   Banner → Setup → Status → Eval progress → Summary →
+ *   Assessment display → Status line (persistent)
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import type { Key } from 'ink';
 import { COLORS, getBannerText } from './theme';
 import { store } from './store';
 import type { DashboardState, PipelinePhase, EvalPhase } from './store';
@@ -46,13 +37,25 @@ function useElapsedTimer(startMs: number, finalElapsed: string, isWorking: boole
     return () => clearInterval(id);
   }, [isWorking, startMs]);
 
-  // Use the final value once set
   if (finalElapsed) return finalElapsed;
-  if (startMs === 0) return '';
-  if (!isWorking) return '';
+  if (startMs === 0 || !isWorking) return '';
+  return `${((now - startMs) / 1000).toFixed(1)}s`;
+}
 
-  const ms = now - startMs;
-  return `${(ms / 1000).toFixed(1)}s`;
+// ── Auto-clear learned message ───────────────────────────────
+
+function useLearnedMessage(msg: string): string {
+  const [visible, setVisible] = useState(msg);
+  useEffect(() => {
+    if (!msg) { setVisible(''); return; }
+    setVisible(msg);
+    const id = setTimeout(() => {
+      setVisible('');
+      store.setLearnedMessage('');
+    }, 4000);
+    return () => clearTimeout(id);
+  }, [msg]);
+  return visible;
 }
 
 // ── Phase labels ─────────────────────────────────────────────
@@ -86,11 +89,6 @@ function statsText(s: DashboardState, liveElapsed: string): string {
   return parts.length > 0 ? parts.join(' · ') : '';
 }
 
-function setupLine(notes: string[]): string {
-  if (notes.length === 0) return '';
-  return notes.join(' · ');
-}
-
 function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | null {
   switch (phase) {
     case 'idle': return null;
@@ -112,18 +110,16 @@ function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | n
         }
         return parts.join(' · ');
       }
-      return 'Evaluation complete';
+      return null;
   }
 }
 
-/** Format a token count with k suffix for readability. */
 function fmtTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 // ── Component ────────────────────────────────────────────────
 
-/** Phases where the first-run message should be visible. */
 const FIRST_RUN_VISIBLE = new Set<PipelinePhase>(['idle', 'discovering', 'analyzing']);
 
 const Dashboard: React.FC = () => {
@@ -134,36 +130,65 @@ const Dashboard: React.FC = () => {
     return () => { store.removeListener('change', fn); };
   }, []);
 
+  // ── Keyboard handling ──────────────────────────────────────
+  useInput((input: string, _key: Key) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = (store as any)._onAssessmentAction as ((a: any) => void) | undefined;
+    if (!handler) return;
+
+    const current = store.state.currentAssessment;
+
+    // Global keys
+    if (input === 'r') {
+      handler({ type: 'rerun' });
+      return;
+    }
+
+    // Assessment keys (only when an assessment is shown)
+    if (!current) return;
+
+    if (input === 'n') {
+      handler({ type: 'dismiss', assessment: current });
+    } else if (input === 'y') {
+      // Print suggestion prominently
+      if (current.suggestion) {
+        process.stderr.write(`\n  Suggestion:\n  ${current.suggestion}\n\n`);
+      }
+      handler({ type: 'confirm', assessment: current });
+    } else if (input === 's') {
+      handler({ type: 'skip', assessment: current });
+    }
+  });
+
   const compact = s.compact;
   const working = WORKING.has(s.phase);
   const spinner = useSpinner(working);
   const liveElapsed = useElapsedTimer(s.runStartMs, s.elapsed, working);
   const stats = statsText(s, liveElapsed);
   const detail = s.phaseDetail ? ` (${s.phaseDetail})` : '';
-  const setup = setupLine(s.setupNotes);
+  const setup = s.setupNotes.length > 0 ? s.setupNotes.join(' · ') : '';
   const evalLabel = evalText(s.evalStatus.phase, s.evalStatus);
   const evalDone = s.evalStatus.phase === 'done';
   const evalActive = s.evalStatus.phase !== 'idle';
   const allPassed = s.evalStatus.probesPassed === s.evalStatus.probesTotal;
   const hasProbes = (s.evalStatus.probesTotal ?? 0) > 0;
   const isDone = s.phase === 'done' || s.phase === 'watching';
+  const learnedMsg = useLearnedMessage(s.learnedMessage);
 
-  // Collapse reasoning to a single short line; hide the trivial "generation complete" message
-  const TRIVIAL_RE = /single.pass generation|generation complete/i;
-  const meaningful = s.reasoning.filter((r) => !TRIVIAL_RE.test(r));
-  const raw = meaningful.join(' · ');
-  const reasoningLine = raw.length > 80 ? raw.slice(0, 77) + '…' : raw;
+  const current = s.currentAssessment;
+  const queueLen = s.pendingAssessments.length;
+  const aStats = s.assessmentStats;
 
   return (
     <Box flexDirection="column">
-      {/* ── Banner (hidden in compact mode) ──────────── */}
+      {/* ── Banner ──────────────────────────────── */}
       {!compact && (
         <Box marginBottom={0}>
           <Text color={COLORS.primary} bold>{getBannerText()}</Text>
         </Box>
       )}
 
-      {/* ── First-run welcome message ────────────────── */}
+      {/* ── First-run ────────────────────────────── */}
       {s.isFirstRun && FIRST_RUN_VISIBLE.has(s.phase) && (
         <Box marginBottom={0}>
           <Text color={COLORS.gray}>
@@ -172,19 +197,19 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
-      {/* ── Setup notes (compact: show only if warning) ─ */}
+      {/* ── Setup notes ──────────────────────────── */}
       {setup !== '' && !(compact && !s.warning) && (
         <Box marginTop={1}>
           <Text color={COLORS.gray}>{`  ${setup}`}</Text>
         </Box>
       )}
 
-      {/* ── Status line ──────────────────────────────── */}
+      {/* ── Status line ──────────────────────────── */}
       <Box>
         {working && (
           <Text color={COLORS.primary}>{`  ${spinner} ${PHASE_TEXT[s.phase]}${detail}`}</Text>
         )}
-        {s.phase === 'watching' && (
+        {s.phase === 'watching' && !current && (
           <Text color={COLORS.green}>{'  * Watching'}</Text>
         )}
         {s.phase === 'done' && s.outputs.length > 0 && (
@@ -196,27 +221,27 @@ const Dashboard: React.FC = () => {
         {s.phase === 'error' && (
           <Text color={COLORS.red}>{'  ✖ Error'}</Text>
         )}
-        {stats !== '' && (
+        {stats !== '' && !working && isDone && !current && (
           <Text color={COLORS.gray}>{`  ${stats}`}</Text>
         )}
       </Box>
 
-      {/* ── Evaluator progress (hidden when 0 probes at completion) ── */}
+      {/* ── Evaluator progress ────────────────────── */}
       {evalActive && evalLabel && !(evalDone && !hasProbes) && (
         <Text color={evalDone && allPassed ? COLORS.green : evalDone ? COLORS.yellow : COLORS.primaryDim}>
           {`  ${evalLabel}`}
         </Text>
       )}
 
-      {/* ── Token usage ──────────────────────────────── */}
-      {s.tokenUsage && isDone && (
+      {/* ── Token usage ──────────────────────────── */}
+      {s.tokenUsage && isDone && !current && (
         <Text color={COLORS.gray}>
           {`  ${fmtTokens(s.tokenUsage.inputTokens)} in · ${fmtTokens(s.tokenUsage.outputTokens)} out`}
         </Text>
       )}
 
-      {/* ── Content summary ──────────────────────────── */}
-      {s.summary && isDone && (
+      {/* ── Content summary ──────────────────────── */}
+      {s.summary && isDone && !current && (
         <Box flexDirection="column">
           <Text color={COLORS.gray}>
             {`  ├ ${s.summary.sections} sections · ${s.summary.rules} rules` +
@@ -231,8 +256,8 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
-      {/* ── Diff summary (watch-mode regeneration) ───── */}
-      {s.diffSummary && s.diffSummary.changed && isDone && (
+      {/* ── Diff summary ─────────────────────────── */}
+      {s.diffSummary && s.diffSummary.changed && isDone && !current && (
         <Text color={COLORS.gray}>
           {`  ↳ AGENTS.md: ` +
             (s.diffSummary.added > 0 ? `+${s.diffSummary.added} lines` : '') +
@@ -240,25 +265,66 @@ const Dashboard: React.FC = () => {
             (s.diffSummary.removed > 0 ? `-${s.diffSummary.removed} lines` : '')}
         </Text>
       )}
-      {s.diffSummary && !s.diffSummary.changed && isDone && (
-        <Text color={COLORS.gray}>{'  ↳ AGENTS.md: no changes'}</Text>
-      )}
 
-      {/* ── Change trigger ───────────────────────────── */}
-      {s.lastChange !== '' && working && (
-        <Text color={COLORS.gray}>{`  ↳ ${s.lastChange}`}</Text>
-      )}
-
-      {/* ── Warning ──────────────────────────────────── */}
+      {/* ── Warning ──────────────────────────────── */}
       {s.warning !== '' && (
         <Box marginTop={0}>
           <Text color={COLORS.yellow}>{`  ! ${s.warning}`}</Text>
         </Box>
       )}
 
-      {/* ── Reasoning — single line, hidden in compact or when trivial ── */}
-      {!compact && reasoningLine !== '' && isDone && (
-        <Text color={COLORS.gray}>{`  ℹ ${reasoningLine}`}</Text>
+      {/* ══ v2: Current assessment ═══════════════════ */}
+      {current && current.type === 'warning' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={COLORS.yellow} bold>
+            {`  ⚠ ${current.file}`}
+            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
+          </Text>
+          <Text color={COLORS.yellow}>{`    ${current.message}`}</Text>
+          {current.details && (
+            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
+          )}
+          <Text color={COLORS.gray}>
+            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
+          </Text>
+        </Box>
+      )}
+
+      {current && current.type === 'violation' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={COLORS.red} bold>
+            {`  ✖ ${current.file}`}
+            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
+          </Text>
+          <Text color={COLORS.red}>{`    ${current.message}`}</Text>
+          {current.details && (
+            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
+          )}
+          {current.suggestion && (
+            <Text color={COLORS.gray}>{`    → ${current.suggestion}`}</Text>
+          )}
+          <Text color={COLORS.gray}>
+            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
+          </Text>
+        </Box>
+      )}
+
+      {/* ── Learned message (auto-clears) ─────────── */}
+      {learnedMsg !== '' && (
+        <Text color={COLORS.green}>{`  ✔ ${learnedMsg}`}</Text>
+      )}
+
+      {/* ══ v2: Persistent status line ════════════════ */}
+      {isDone && s.phase === 'watching' && (
+        <Box marginTop={1}>
+          <Text color={COLORS.gray}>
+            {`  aspect ● watching` +
+              ` · ${aStats.changes} changes` +
+              (aStats.warnings > 0 ? ` · ${aStats.warnings} warnings` : '') +
+              (s.preferenceCount > 0 ? ` · ${s.preferenceCount} learned` : '') +
+              ` · [r] rerun`}
+          </Text>
+        </Box>
       )}
     </Box>
   );

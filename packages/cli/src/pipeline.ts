@@ -1,14 +1,9 @@
 /**
- * aspectcode pipeline — the single pipeline that does everything.
+ * aspectcode pipeline — analyze, generate, watch, evaluate.
  *
- * 1. Discover files → tree-sitter analysis
- * 2. Build KB in memory (architecture + map + context)
- * 3. Scan & read other AI tool instruction files as context
- * 4. Build KB-custom content from analysis
- * 5. If generate=true → LLM generates AGENTS.md (or static fallback)
- *    If generate=false → write KB-custom content only (skip LLM)
- * 6. If --kb flag → also write kb.md
- * 7. If not --once → watch for changes and repeat (always generate)
+ * v2: After generating AGENTS.md, watch mode evaluates individual file
+ * changes in real time instead of re-running the full pipeline every time.
+ * Full re-runs happen on a 5-minute timer or when the user presses 'r'.
  */
 
 import * as fs from 'fs';
@@ -30,39 +25,47 @@ import { selectPrompt } from './ui/prompts';
 import { store } from './ui/store';
 import { summarizeContent } from './summary';
 import { diffSummary } from './diffSummary';
-import { updateRuntimeState } from './runtimeState';
+import { updateRuntimeState, getRuntimeState } from './runtimeState';
+import { loadPreferences, savePreferences, addPreference } from './preferences';
+import type { PreferencesStore } from './preferences';
+import { evaluateChange, trackChange, getRecentChanges } from './changeEvaluator';
+import type { ChangeAssessment } from './changeEvaluator';
 
-// ── Watch constants ──────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────
 
-const DEBOUNCE_MS = 2000;
+const EVAL_DEBOUNCE_MS = 500;
+const RERUN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const IGNORED_SEGMENTS = [
   '/node_modules/', '/.git/', '/dist/', '/build/', '/target/',
   '/coverage/', '/.next/', '/__pycache__/', '/.venv/', '/venv/',
   '/.pytest_cache/', '/.mypy_cache/', '/.tox/', '/htmlcov/',
+  '/.aspectcode/',
 ];
 
-/** Check whether a path should be excluded from watch events. */
 export function isIgnoredPath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase();
   return IGNORED_SEGMENTS.some((seg) => normalized.includes(seg));
 }
 
-/** Check whether a file extension is one we analyze. */
 export function isSupportedSourceFile(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
   return SUPPORTED_EXTENSIONS.includes(ext);
 }
 
-// ── Single pipeline run result ───────────────────────────────
+// ── File change event ────────────────────────────────────────
 
-interface RunOnceResult {
-  code: ExitCodeValue;
-  /** KB content from this run. */
-  kbContent: string;
+export interface FileChangeEvent {
+  type: 'add' | 'change' | 'unlink';
+  path: string;
 }
 
 // ── Single pipeline run ──────────────────────────────────────
+
+interface RunOnceResult {
+  code: ExitCodeValue;
+  kbContent: string;
+}
 
 async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
@@ -72,7 +75,6 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   store.setRunStartMs(startMs);
   store.addSetupNote(config ? 'config loaded' : 'no config');
 
-  // ── First-run detection ───────────────────────────────────
   const agentsPath = path.join(root, 'AGENTS.md');
   if (!fs.existsSync(agentsPath)) {
     store.setFirstRun(true);
@@ -82,7 +84,7 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   store.setPhase('discovering');
   const workspace = await loadWorkspaceFiles(root, config, log, { quiet: flags.quiet, spin: ctx.spin });
   if (workspace.discoveredPaths.length === 0) {
-    log.warn('No source files found. Check your workspace or exclude patterns.');
+    log.warn('No source files found.');
     return { code: ExitCode.ERROR, kbContent: '' };
   }
 
@@ -94,92 +96,72 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
     workspace.absoluteFiles,
     workspace.host,
   );
-  spinAnalyze.stop(
-    `Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`,
-  );
+  spinAnalyze.stop(`Analyzed ${model.files.length} files, ${model.graph.edges.length} edges`);
   store.setStats(model.files.length, model.graph.edges.length);
 
-  // ── 3. Build KB content in memory ─────────────────────────
+  // ── 3. Build KB ───────────────────────────────────────────
   const spinKb = ctx.spin('Building knowledge base…', 'building-kb');
   const kbContent = buildKbContent(model, root, workspace.relativeFiles);
   spinKb.stop('Knowledge base built');
 
-  // ── 4. Read other AI tool instruction files ───────────────
+  // ── 4. Read tool instruction files ────────────────────────
   const host = createNodeEmitterHost();
   const toolInstructions = await readToolInstructions(host, root);
   if (toolInstructions.size > 0) {
-    const toolNames = [...toolInstructions.keys()].join(', ');
-    store.addSetupNote(`context: ${toolNames}`);
-    log.debug(`Read ${toolInstructions.size} AI tool instruction file(s) as context`);
+    store.addSetupNote(`context: ${[...toolInstructions.keys()].join(', ')}`);
   }
 
-  // ── 5. Build base content from KB ──────────────────────────
+  // ── 5. Build base content ─────────────────────────────────
   const baseContent = kbContent.length > 0
     ? generateKbCustomContent(kbContent, 'safe')
     : generateCanonicalContentForMode('safe', false);
 
-  // ── 6. Generate or skip ────────────────────────────────────
+  // ── 6. Generate or skip ───────────────────────────────────
   let finalContent = baseContent;
 
   if (ctx.generate) {
-    // Write base immediately so user sees output before LLM finishes
     if (!flags.dryRun) {
       await writeAgentsMd(host, root, baseContent, ownership);
       store.addOutput('AGENTS.md written (base)');
-      log.debug('Base AGENTS.md written from static analysis');
     }
 
     store.setPhase('optimizing');
     const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config, baseContent);
     finalContent = optimizeResult.content;
 
-    // ── Write LLM-generated AGENTS.md ─────────────────────
     store.setPhase('writing');
     if (flags.dryRun) {
       log.info(fmt.bold('Dry run — proposed AGENTS.md:'));
       log.blank();
       log.info(finalContent);
-      log.blank();
     } else {
-      // Compute diff before overwriting (for watch-mode change summary)
       let previousContent: string | undefined;
       try {
         if (fs.existsSync(agentsPath)) {
           previousContent = fs.readFileSync(agentsPath, 'utf-8');
         }
-      } catch { /* ignore read errors */ }
+      } catch { /* ignore */ }
 
       await writeAgentsMd(host, root, finalContent, ownership);
       const modeLabel = ownership === 'section' ? ' (section)' : '';
       const verb = optimizeResult.reasoning.length > 0 ? 'generated' : 'written';
       store.addOutput(`AGENTS.md ${verb}${modeLabel}`);
-      log.success(`AGENTS.md ${verb}${modeLabel}`);
 
-      // Diff summary (skip on first write when previous was just the base template)
       if (previousContent !== undefined && previousContent !== baseContent) {
-        const diff = diffSummary(previousContent, finalContent);
-        store.setDiffSummary(diff);
+        store.setDiffSummary(diffSummary(previousContent, finalContent));
       }
-
-      // Content summary for the dashboard
-      const summary = summarizeContent(finalContent);
-      store.setSummary(summary);
+      store.setSummary(summarizeContent(finalContent));
     }
   } else {
-    // Skip LLM — write KB-custom content only
     store.setPhase('writing');
     if (flags.dryRun) {
       log.info(fmt.bold('Dry run — proposed AGENTS.md (KB-custom):'));
       log.blank();
       log.info(baseContent);
-      log.blank();
     } else {
       await writeAgentsMd(host, root, baseContent, ownership);
       store.addOutput('AGENTS.md written (KB-custom)');
-      log.success('AGENTS.md written from static analysis');
-
-      const summary = summarizeContent(baseContent);
-      store.setSummary(summary);
+      store.setSummary(summarizeContent(baseContent));
     }
     store.addSetupNote('generation skipped');
   }
@@ -188,10 +170,9 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   if (flags.kb && !flags.dryRun) {
     await writeKbMd(host, root, kbContent);
     store.addOutput('kb.md written');
-    log.success('kb.md written');
   }
 
-  // ── 8. Persist runtime state for other modules ────────────
+  // ── 8. Persist runtime state ──────────────────────────────
   updateRuntimeState({
     model,
     kbContent,
@@ -202,22 +183,13 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
   const elapsedMs = Date.now() - startMs;
   store.setElapsed(`${(elapsedMs / 1000).toFixed(1)}s`);
   store.setPhase('done');
-  log.info(fmt.dim(`Done in ${(elapsedMs / 1000).toFixed(1)}s`));
   return { code: ExitCode.OK, kbContent };
 }
 
-// ── Pipeline entry point ─────────────────────────────────────
+// ── Resolve ownership mode ───────────────────────────────────
 
-/**
- * Resolve AGENTS.md ownership mode and whether to generate on this run.
- *
- * Called from main() BEFORE the ink dashboard is mounted, because
- * the interactive prompt uses raw stdin which conflicts with ink's useInput.
- */
 export async function resolveRunMode(root: string): Promise<RunMode> {
   const config = loadConfig(root);
-
-  // Config-driven ownership skips prompt but still generates
   if (config?.ownership) {
     return { ownership: config.ownership, generate: true };
   }
@@ -226,78 +198,88 @@ export async function resolveRunMode(root: string): Promise<RunMode> {
     const agentsPath = path.join(root, 'AGENTS.md');
     if (fs.existsSync(agentsPath)) {
       const existing = fs.readFileSync(agentsPath, 'utf-8');
-      // Auto-detect section markers → continue in section mode
-      if (hasMarkers(existing)) {
-        return { ownership: 'section', generate: true };
-      }
-      // Existing file without markers → full control, skip generation
+      if (hasMarkers(existing)) return { ownership: 'section', generate: true };
       return { ownership: 'full', generate: false };
     }
-  } catch {
-    // Read error — fall through to prompt
-  }
+  } catch { /* fall through */ }
 
-  // No AGENTS.md → show 2-option prompt (default: full + generate)
   try {
     const idx = await selectPrompt(
       'How should AspectCode manage AGENTS.md?',
-      [
-        'Full control (replace entire file)',
-        'Section control (preserve your content)',
-      ],
+      ['Full control (replace entire file)', 'Section control (preserve your content)'],
       0,
     );
-    const ownership = idx === 1 ? 'section' : 'full' as const;
-    return { ownership, generate: true };
+    return { ownership: idx === 1 ? 'section' : 'full', generate: true };
   } catch {
-    // Non-interactive → default to full + generate
     return { ownership: 'full', generate: true };
   }
 }
 
-// ── File change event ────────────────────────────────────────
+// ── Assessment action handler ────────────────────────────────
 
-/** Describes a detected file-system change. */
-export interface FileChangeEvent {
-  type: 'add' | 'change' | 'unlink';
-  /** Workspace-relative posix path. */
-  path: string;
+export interface AssessmentAction {
+  type: 'dismiss' | 'confirm' | 'skip' | 'rerun';
+  assessment?: ChangeAssessment;
 }
 
-/**
- * Callback invoked when file changes are detected in watch mode.
- * Returns the action to take: 'full-pipeline' re-runs the entire
- * pipeline; future v2 will add 'evaluate' for lightweight checks.
- */
-export type FileChangeHandler = (events: FileChangeEvent[]) => 'full-pipeline';
+function handleAssessmentAction(
+  action: AssessmentAction,
+  prefs: PreferencesStore,
+  root: string,
+): PreferencesStore {
+  if (!action.assessment) return prefs;
+  const a = action.assessment;
+  const dir = path.dirname(a.file) + '/';
 
-/** Default handler — always re-runs the full pipeline. */
-const defaultChangeHandler: FileChangeHandler = () => 'full-pipeline';
+  if (action.type === 'dismiss') {
+    prefs = addPreference(prefs, {
+      rule: a.rule,
+      pattern: a.message,
+      disposition: 'allow',
+      directory: dir,
+    });
+    savePreferences(root, prefs);
+    store.setPreferenceCount(prefs.preferences.length);
+    store.setLearnedMessage(`Learned: ${a.rule} ok in ${dir}`);
+    store.resolveAssessment('dismiss');
+  } else if (action.type === 'confirm') {
+    prefs = addPreference(prefs, {
+      rule: a.rule,
+      pattern: a.message,
+      disposition: 'deny',
+      directory: dir,
+    });
+    savePreferences(root, prefs);
+    store.setPreferenceCount(prefs.preferences.length);
+    store.resolveAssessment('confirm');
+  } else if (action.type === 'skip') {
+    store.advanceAssessment();
+  }
 
-export async function runPipeline(
-  ctx: RunContext,
-  onFileChange: FileChangeHandler = defaultChangeHandler,
-): Promise<ExitCodeValue> {
+  return prefs;
+}
+
+// ── Main pipeline ────────────────────────────────────────────
+
+export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   const { root, flags, log, ownership } = ctx;
 
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
 
-  // ── Initial run ──────────────────────────────────────────
+  // ── Initial run ────────────────────────────────────────────
   const result = await runOnce(ctx, ownership);
-
-  // After first run, always generate on subsequent watch-triggered runs
   ctx.generate = true;
   if (result.code !== ExitCode.OK) return result.code;
 
-  // ── --once: exit immediately ───────────────────────────────
-  if (flags.once) {
-    return ExitCode.OK;
-  }
+  if (flags.once) return ExitCode.OK;
 
-  // ── Watch mode ────────────────────────────────────────────
+  // ── Load preferences ───────────────────────────────────────
+  let prefs = loadPreferences(root);
+  store.setPreferenceCount(prefs.preferences.length);
+
+  // ── Watch mode with real-time evaluation ───────────────────
   log.blank();
-  log.info(fmt.dim('Watching for changes… (Ctrl+C to stop)'));
   store.setPhase('watching');
 
   const chokidarModule = await import('chokidar');
@@ -307,62 +289,84 @@ export async function runPipeline(
     cwd: root,
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
-    ignored: (watchedPath: string) => {
-      const abs = path.resolve(root, watchedPath);
-      return isIgnoredPath(abs);
-    },
+    ignored: (watchedPath: string) => isIgnoredPath(path.resolve(root, watchedPath)),
   });
 
-  let timer: NodeJS.Timeout | undefined;
-  let running = false;
-  let pending = false;
+  let evalTimer: NodeJS.Timeout | undefined;
+  let pipelineRunning = false;
   let stopped = false;
-  let pendingEvents: FileChangeEvent[] = [];
+  let pendingEvalEvents: FileChangeEvent[] = [];
 
-  const triggerRun = async (events: FileChangeEvent[]): Promise<void> => {
-    if (stopped) return;
-    if (running) { pending = true; return; }
+  // ── Full pipeline re-run (on timer or 'r' key) ────────────
 
-    const action = onFileChange(events);
-
-    running = true;
+  const doFullRerun = async (): Promise<void> => {
+    if (stopped || pipelineRunning) return;
+    pipelineRunning = true;
     try {
-      const reason = events.map((e) => `${e.type}: ${e.path}`).join(', ');
-      log.blank();
-      log.info(`${fmt.bold('change detected:')} ${reason}`);
-      store.setLastChange(reason);
-
-      if (action === 'full-pipeline') {
-        await runOnce(ctx, ownership);
-      }
-
+      await runOnce(ctx, ownership);
+      prefs = loadPreferences(root);
+      store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       log.error(`Pipeline failed: ${msg}`);
     } finally {
-      running = false;
-      if (pending && !stopped) {
-        pending = false;
-        const queued = pendingEvents.splice(0);
-        void triggerRun(queued.length > 0 ? queued : [{ type: 'change', path: '(queued)' }]);
+      pipelineRunning = false;
+    }
+  };
+
+  // Schedule periodic full re-runs
+  const rerunInterval = setInterval(() => { void doFullRerun(); }, RERUN_INTERVAL_MS);
+
+  // ── Evaluate file changes (fast, no LLM) ──────────────────
+
+  const evaluateEvents = (events: FileChangeEvent[]): void => {
+    const state = getRuntimeState();
+    if (!state.model || !state.agentsContent) return;
+
+    for (const event of events) {
+      trackChange(event);
+
+      // Read fresh file content if the file was added or changed
+      if (event.type !== 'unlink') {
+        try {
+          const absPath = path.join(root, event.path);
+          if (fs.existsSync(absPath)) {
+            const content = fs.readFileSync(absPath, 'utf-8');
+            state.fileContents?.set(event.path, content);
+          }
+        } catch { /* skip unreadable files */ }
+      }
+
+      const assessments = evaluateChange(event, {
+        model: state.model,
+        agentsContent: state.agentsContent,
+        preferences: prefs,
+        recentChanges: getRecentChanges(),
+        fileContents: state.fileContents,
+      });
+
+      if (assessments.length > 0) {
+        store.pushAssessments(assessments);
       }
     }
   };
+
+  // ── File change handler ────────────────────────────────────
 
   const onFsEvent = (eventType: 'add' | 'change' | 'unlink', eventPath: string) => {
     const abs = path.resolve(root, eventPath);
     if (!isSupportedSourceFile(abs) || isIgnoredPath(abs)) return;
 
     const posixPath = eventPath.replace(/\\/g, '/');
-    pendingEvents.push({ type: eventType, path: posixPath });
+    pendingEvalEvents.push({ type: eventType, path: posixPath });
 
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      const events = pendingEvents.splice(0);
-      void triggerRun(events);
-    }, DEBOUNCE_MS);
+    if (evalTimer) clearTimeout(evalTimer);
+    evalTimer = setTimeout(() => {
+      evalTimer = undefined;
+      const events = pendingEvalEvents.splice(0);
+      evaluateEvents(events);
+    }, EVAL_DEBOUNCE_MS);
   };
 
   watcher.on('add', (p: string) => onFsEvent('add', p));
@@ -371,13 +375,27 @@ export async function runPipeline(
   watcher.on('error', (e: unknown) => log.error(`Watcher error: ${String(e)}`));
 
   await new Promise<void>((resolve) => watcher.once('ready', resolve));
-  log.info(fmt.dim('Watcher ready.'));
+
+  // ── Expose action handler for keyboard input ───────────────
+  // The dashboard calls this via the store when user presses keys.
+  // We attach it to the store so the dashboard component can invoke it.
+  const onAssessmentAction = (action: AssessmentAction): void => {
+    if (action.type === 'rerun') {
+      void doFullRerun();
+      return;
+    }
+    prefs = handleAssessmentAction(action, prefs, root);
+  };
+
+  // Expose the handler on the store for the dashboard to call
+  (store as any)._onAssessmentAction = onAssessmentAction;
 
   return await new Promise<ExitCodeValue>((resolve) => {
     const shutdown = async (signal: string) => {
       if (stopped) return;
       stopped = true;
-      if (timer) { clearTimeout(timer); timer = undefined; }
+      clearInterval(rerunInterval);
+      if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));
       await watcher.close();
