@@ -2,8 +2,8 @@
  * aspectcode pipeline — analyze, generate, watch, evaluate.
  *
  * v2: After generating AGENTS.md, watch mode evaluates individual file
- * changes in real time instead of re-running the full pipeline every time.
- * Full re-runs happen on a 5-minute timer or when the user presses 'r'.
+ * changes in real time. Full probe-and-refine runs on first startup
+ * or when the user presses 'r'.
  */
 
 import * as fs from 'fs';
@@ -34,7 +34,6 @@ import type { ChangeAssessment } from './changeEvaluator';
 // ── Constants ────────────────────────────────────────────────
 
 const EVAL_DEBOUNCE_MS = 500;
-const RERUN_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const IGNORED_SEGMENTS = [
   '/node_modules/', '/.git/', '/dist/', '/build/', '/target/',
@@ -67,7 +66,15 @@ interface RunOnceResult {
   kbContent: string;
 }
 
-async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOnceResult> {
+/**
+ * @param probeAndRefine  Run probe-based evaluation after LLM generation.
+ *                        Only on first run or when user presses 'r'.
+ */
+async function runOnce(
+  ctx: RunContext,
+  ownership: OwnershipMode,
+  probeAndRefine = false,
+): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
   const startMs = Date.now();
@@ -126,7 +133,9 @@ async function runOnce(ctx: RunContext, ownership: OwnershipMode): Promise<RunOn
     }
 
     store.setPhase('optimizing');
-    const optimizeResult = await tryOptimize(ctx, kbContent, toolInstructions, config, baseContent);
+    const optimizeResult = await tryOptimize(
+      ctx, kbContent, toolInstructions, config, baseContent, probeAndRefine,
+    );
     finalContent = optimizeResult.content;
 
     store.setPhase('writing');
@@ -218,7 +227,7 @@ export async function resolveRunMode(root: string): Promise<RunMode> {
 // ── Assessment action handler ────────────────────────────────
 
 export interface AssessmentAction {
-  type: 'dismiss' | 'confirm' | 'skip' | 'rerun';
+  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine';
   assessment?: ChangeAssessment;
 }
 
@@ -267,8 +276,8 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
 
-  // ── Initial run ────────────────────────────────────────────
-  const result = await runOnce(ctx, ownership);
+  // ── Initial run (with probe and refine) ────────────────────
+  const result = await runOnce(ctx, ownership, true);
   ctx.generate = true;
   if (result.code !== ExitCode.OK) return result.code;
 
@@ -297,26 +306,23 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   let stopped = false;
   let pendingEvalEvents: FileChangeEvent[] = [];
 
-  // ── Full pipeline re-run (on timer or 'r' key) ────────────
+  // ── Probe and refine (manual via 'r' key) ──────────────────
 
-  const doFullRerun = async (): Promise<void> => {
+  const doProbeAndRefine = async (): Promise<void> => {
     if (stopped || pipelineRunning) return;
     pipelineRunning = true;
     try {
-      await runOnce(ctx, ownership);
+      await runOnce(ctx, ownership, true);
       prefs = loadPreferences(root);
       store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error(`Pipeline failed: ${msg}`);
+      log.error(`Probe and refine failed: ${msg}`);
     } finally {
       pipelineRunning = false;
     }
   };
-
-  // Schedule periodic full re-runs
-  const rerunInterval = setInterval(() => { void doFullRerun(); }, RERUN_INTERVAL_MS);
 
   // ── Evaluate file changes (fast, no LLM) ──────────────────
 
@@ -327,7 +333,6 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     for (const event of events) {
       trackChange(event);
 
-      // Read fresh file content if the file was added or changed
       if (event.type !== 'unlink') {
         try {
           const absPath = path.join(root, event.path);
@@ -377,24 +382,20 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   await new Promise<void>((resolve) => watcher.once('ready', resolve));
 
   // ── Expose action handler for keyboard input ───────────────
-  // The dashboard calls this via the store when user presses keys.
-  // We attach it to the store so the dashboard component can invoke it.
   const onAssessmentAction = (action: AssessmentAction): void => {
-    if (action.type === 'rerun') {
-      void doFullRerun();
+    if (action.type === 'probe-and-refine') {
+      void doProbeAndRefine();
       return;
     }
     prefs = handleAssessmentAction(action, prefs, root);
   };
 
-  // Expose the handler on the store for the dashboard to call
   (store as any)._onAssessmentAction = onAssessmentAction;
 
   return await new Promise<ExitCodeValue>((resolve) => {
     const shutdown = async (signal: string) => {
       if (stopped) return;
       stopped = true;
-      clearInterval(rerunInterval);
       if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));

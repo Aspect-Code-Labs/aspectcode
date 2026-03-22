@@ -92,16 +92,12 @@ function statsText(s: DashboardState, liveElapsed: string): string {
 function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | null {
   switch (phase) {
     case 'idle': return null;
-    case 'harvesting':
-      return s.harvestCount !== undefined
-        ? `Harvested ${s.harvestCount} prompt${s.harvestCount === 1 ? '' : 's'}`
-        : 'Harvesting prompts…';
     case 'probing':
       return s.probesPassed !== undefined && s.probesTotal !== undefined
         ? `Probes: ${s.probesPassed}/${s.probesTotal} passed`
-        : 'Running probes…';
+        : 'Probing…';
     case 'diagnosing':
-      return 'Diagnosing failures…';
+      return 'Refining…';
     case 'done':
       if (s.probesPassed !== undefined && s.probesTotal !== undefined) {
         const parts = [`${s.probesPassed}/${s.probesTotal} probes passed`];
@@ -140,7 +136,7 @@ const Dashboard: React.FC = () => {
 
     // Global keys
     if (input === 'r') {
-      handler({ type: 'rerun' });
+      handler({ type: 'probe-and-refine' });
       return;
     }
 
@@ -322,7 +318,7 @@ const Dashboard: React.FC = () => {
               ` · ${aStats.changes} changes` +
               (aStats.warnings > 0 ? ` · ${aStats.warnings} warnings` : '') +
               (s.preferenceCount > 0 ? ` · ${s.preferenceCount} learned` : '') +
-              ` · [r] rerun`}
+              ` · [r] probe and refine`}
           </Text>
         </Box>
       )}

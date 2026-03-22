@@ -21,12 +21,11 @@ export type PipelinePhase =
   | 'error';
 
 /** Evaluator sub-phase for transparent progress reporting. */
-export type EvalPhase = 'idle' | 'harvesting' | 'probing' | 'diagnosing' | 'done';
+export type EvalPhase = 'idle' | 'probing' | 'diagnosing' | 'done';
 
 /** Evaluator status shown in the dashboard. */
 export interface EvalStatus {
   phase: EvalPhase;
-  harvestCount?: number;
   probesPassed?: number;
   probesTotal?: number;
   diagnosisEdits?: number;

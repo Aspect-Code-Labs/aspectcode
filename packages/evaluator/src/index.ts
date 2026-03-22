@@ -13,13 +13,10 @@ export type {
   BehaviorResult,
   Diagnosis,
   AgentsEdit,
-  HarvestedPrompt,
-  PromptSource,
   ProbeGeneratorOptions,
   ProbeRunnerOptions,
   ProbeEvaluatorOptions,
   DiagnosisOptions,
-  HarvestOptions,
   EvaluationResult,
   LlmProvider,
   OptLogger,
@@ -35,5 +32,3 @@ export type { ProbeProgressCallback } from './runner';
 // ── Diagnosis ───────────────────────────────────────────────
 export { diagnose, applyDiagnosisEdits } from './diagnosis';
 
-// ── Prompt harvesting ───────────────────────────────────────
-export { harvestPrompts } from './harvest/index';

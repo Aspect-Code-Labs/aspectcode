@@ -1,8 +1,8 @@
 /**
  * Optimize wrapper — tries LLM optimization, falls back to static content.
  *
- * - If an API key is available → run the optimization agent
- * - If evaluator is enabled → single-pass optimize then probe & diagnose
+ * - If an API key is available → run the generation agent
+ * - If probeAndRefine=true → single-pass generate then probe & diagnose
  * - If no API key → warn and write static AGENTS.md content
  */
 
@@ -17,9 +17,8 @@ import {
   runProbes,
   diagnose,
   applyDiagnosisEdits,
-  harvestPrompts,
 } from '@aspectcode/evaluator';
-import type { HarvestedPrompt, PromptSource, ProbeProgressCallback } from '@aspectcode/evaluator';
+import type { ProbeProgressCallback } from '@aspectcode/evaluator';
 import { generateCanonicalContentForMode, generateKbCustomContent } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import type { AspectCodeConfig } from './config';
@@ -29,15 +28,16 @@ import { store } from './ui/store';
 /** Result of the optimization attempt. */
 export interface OptimizeOutput {
   content: string;
-  /** Per-iteration reasoning (empty when no API key / static fallback). */
   reasoning: string[];
-  /** Token usage from the generation LLM call (undefined when static fallback). */
   tokenUsage?: ChatUsage;
 }
 
 /**
  * Try to generate AGENTS.md content via LLM using static analysis as context.
  * Falls back to static instruction content when no API key is available.
+ *
+ * @param probeAndRefine  When true, run probe-based evaluation after generation
+ *                        and auto-fix failures. Only used on first run or manual rerun.
  */
 export async function tryOptimize(
   ctx: RunContext,
@@ -45,11 +45,12 @@ export async function tryOptimize(
   toolInstructions: Map<string, string>,
   config: AspectCodeConfig | undefined,
   baseContent: string,
+  probeAndRefine = false,
 ): Promise<OptimizeOutput> {
   const { flags, log, root } = ctx;
   const optConfig = config?.optimize;
   const evalConfig = config?.evaluate;
-  const evaluatorEnabled = evalConfig?.enabled !== false; // Default: true
+  const evaluatorEnabled = probeAndRefine && evalConfig?.enabled !== false;
 
   // ── Resolve settings ──────────────────────────────────────
 
@@ -79,7 +80,6 @@ export async function tryOptimize(
   try {
     provider = resolveProvider(env, providerOptions);
   } catch {
-    // No API key available — generate from KB content if available
     store.addSetupNote('no API key — static mode');
     log.warn(
       'No LLM API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env for optimization.',
@@ -93,12 +93,11 @@ export async function tryOptimize(
   const providerLabel = model ? `${provider.name} (${model})` : provider.name;
   store.addSetupNote('API key found');
   if (evaluatorEnabled) {
-    store.addSetupNote('evaluator on');
+    store.addSetupNote('probe and refine');
   }
   log.info(`Generating with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
   store.setProvider(providerLabel);
 
-  // ── Use static content only as fallback (LLM error / cancellation) ─
   const fallbackContent = baseContent;
 
   // ── Build tool instructions context string ────────────────
@@ -111,19 +110,15 @@ export async function tryOptimize(
     toolContext = parts.join('\n\n');
   }
 
-  // ── Progress callbacks for live dashboard updates ─────────
+  // ── Progress callbacks ────────────────────────────────────
   const onProgress = (step: OptimizeStep): void => {
-    switch (step.kind) {
-      case 'generating':
-        store.setPhase('optimizing', 'generating AGENTS.md…');
-        break;
-      case 'done':
-        store.setPhase('optimizing', 'generation complete');
-        break;
+    if (step.kind === 'generating') {
+      store.setPhase('optimizing', 'generating AGENTS.md…');
+    } else if (step.kind === 'done') {
+      store.setPhase('optimizing', 'generation complete');
     }
   };
 
-  // ── Wrap logger for dashboard ─────────────────────────────
   const optLog = flags.quiet ? undefined : {
     info(msg: string)  { log.info(msg); },
     warn(msg: string)  { log.warn(msg); },
@@ -131,28 +126,7 @@ export async function tryOptimize(
     debug(msg: string) { log.debug(msg); },
   };
 
-  // ── Harvest prompts for evaluator (if enabled) ────────────
-  let harvestedPrompts: HarvestedPrompt[] = [];
-
-  if (evaluatorEnabled && (evalConfig?.harvestPrompts !== false)) {
-    try {
-      store.setEvalStatus({ phase: 'harvesting' });
-      store.setPhase('optimizing', 'harvesting prompts');
-      harvestedPrompts = await harvestPrompts({
-        root,
-        sources: evalConfig?.harvestSources as PromptSource[] | undefined,
-        maxPerSource: 50,
-        log: optLog,
-      });
-      store.setEvalStatus({ phase: 'harvesting', harvestCount: harvestedPrompts.length });
-      if (harvestedPrompts.length > 0) {
-        log.info(`Harvested ${harvestedPrompts.length} prompts from AI tool history`);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.debug(`Prompt harvesting failed (non-fatal): ${msg}`);
-    }
-  }
+  // ── Generate ──────────────────────────────────────────────
 
   const result = await runGenerateAgent({
     currentInstructions: fallbackContent,
@@ -163,93 +137,50 @@ export async function tryOptimize(
     onProgress,
   });
 
-  for (const reason of result.reasoning) {
-    log.debug(`  ${fmt.dim(reason)}`);
-  }
-
-  // Surface token usage from generation call
   if (result.usage) {
     store.setTokenUsage(result.usage);
   }
 
-  // ── Evaluate with probes (if enabled) ─────────────────────
+  // ── Probe and refine (only when explicitly requested) ─────
   let finalContent = result.optimizedInstructions;
 
   if (evaluatorEnabled) {
     try {
       store.setPhase('evaluating');
       store.setEvalStatus({ phase: 'probing' });
-      log.info('Running probe-based evaluation…');
 
       const maxProbes = evalConfig?.maxProbes ?? 10;
-      const probes = generateProbes({
-        kb: kbContent,
-        harvestedPrompts: harvestedPrompts.length > 0 ? harvestedPrompts : undefined,
-        maxProbes,
-      });
+      const probes = generateProbes({ kb: kbContent, maxProbes });
 
-      // Per-probe progress callback for live dashboard
       const onProbeProgress: ProbeProgressCallback = (info) => {
         if (info.phase === 'starting') {
-          store.setEvalStatus({
-            phase: 'probing',
-            probesPassed: undefined,
-            probesTotal: info.total,
-          });
+          store.setEvalStatus({ phase: 'probing', probesTotal: info.total });
           store.setPhase('evaluating', `probe ${info.probeIndex + 1}/${info.total}: ${info.probeId}`);
         } else {
-          // 'done' — accumulate pass count from results so far
           store.setPhase('evaluating', `probe ${info.probeIndex + 1}/${info.total} ${info.passed ? '✔' : '✖'}`);
         }
       };
 
       const probeResults = await runProbes(
-        finalContent,
-        probes,
-        provider,
-        undefined, // fileContents
-        optLog,
-        undefined, // signal
-        onProbeProgress,
+        finalContent, probes, provider,
+        undefined, optLog, undefined, onProbeProgress,
       );
 
       const failures = probeResults.filter((r) => !r.passed);
       const passCount = probeResults.length - failures.length;
 
-      store.setEvalStatus({
-        phase: 'probing',
-        probesPassed: passCount,
-        probesTotal: probeResults.length,
-      });
-      log.info(
-        `Probes: ${passCount}/${probeResults.length} passed` +
-        (failures.length > 0 ? `, ${failures.length} failed` : ''),
-      );
+      store.setEvalStatus({ phase: 'probing', probesPassed: passCount, probesTotal: probeResults.length });
 
-      // Diagnose and apply edits if there are failures
       if (failures.length > 0) {
         store.setEvalStatus({ phase: 'diagnosing' });
-        store.setPhase('evaluating', 'diagnosing failures');
+        store.setPhase('evaluating', 'refining…');
 
-        const diagnosis = await diagnose(
-          failures,
-          finalContent,
-          provider,
-          optLog,
-        );
+        const diagnosis = await diagnose(failures, finalContent, provider, optLog);
 
         if (diagnosis && diagnosis.edits.length > 0) {
           store.setPhase('evaluating', 'applying fixes');
-          log.info(`Applying ${diagnosis.edits.length} diagnosis-driven edits…`);
-
-          const fixed = await applyDiagnosisEdits(
-            finalContent,
-            diagnosis,
-            provider,
-            optLog,
-          );
+          const fixed = await applyDiagnosisEdits(finalContent, diagnosis, provider, optLog);
           finalContent = fixed.content;
-          log.info(`Diagnosis edits applied (${fixed.appliedEdits.length} changes)`);
         }
 
         store.setEvalStatus({
@@ -259,23 +190,14 @@ export async function tryOptimize(
           diagnosisEdits: diagnosis?.edits.length ?? 0,
         });
       } else {
-        store.setEvalStatus({
-          phase: 'done',
-          probesPassed: passCount,
-          probesTotal: probeResults.length,
-          diagnosisEdits: 0,
-        });
+        store.setEvalStatus({ phase: 'done', probesPassed: passCount, probesTotal: probeResults.length, diagnosisEdits: 0 });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.warn(`Evaluation failed (non-fatal): ${msg}`);
+      log.warn(`Probe and refine failed (non-fatal): ${msg}`);
     }
   }
 
   store.setReasoning(result.reasoning);
-  return {
-    content: finalContent,
-    reasoning: result.reasoning,
-    tokenUsage: result.usage,
-  };
+  return { content: finalContent, reasoning: result.reasoning, tokenUsage: result.usage };
 }
