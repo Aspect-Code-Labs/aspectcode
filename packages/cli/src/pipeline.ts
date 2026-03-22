@@ -294,9 +294,10 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   // Resolve chokidar from this package's node_modules (not the workspace root
   // which may have an older version hoisted from mocha).
   const { createRequire } = await import('module');
+  const { pathToFileURL } = await import('url');
   const localRequire = createRequire(__filename);
   const chokidarPath = localRequire.resolve('chokidar');
-  const chokidarModule = await import(chokidarPath);
+  const chokidarModule = await import(pathToFileURL(chokidarPath).href);
   const chokidar = chokidarModule.default ?? chokidarModule;
 
   const watcher = chokidar.watch('.', {
