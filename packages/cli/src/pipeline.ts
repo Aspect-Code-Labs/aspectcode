@@ -52,6 +52,24 @@ export function isSupportedSourceFile(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.includes(ext);
 }
 
+// ── File watcher ─────────────────────────────────────────────
+
+export function createFileWatcher(
+  root: string,
+  onEvent: (type: 'add' | 'change' | 'unlink', relativePosixPath: string) => void,
+): fs.FSWatcher {
+  return fs.watch(root, { recursive: true }, (event, filename) => {
+    if (!filename) return;
+    const posixPath = filename.replace(/\\/g, '/');
+    const abs = path.resolve(root, filename);
+    if (!isSupportedSourceFile(abs) || isIgnoredPath(abs)) return;
+    const type = event === 'rename'
+      ? (fs.existsSync(abs) ? 'add' : 'unlink')
+      : 'change';
+    onEvent(type, posixPath);
+  });
+}
+
 // ── File change event ────────────────────────────────────────
 
 export interface FileChangeEvent {
@@ -74,13 +92,14 @@ async function runOnce(
   ctx: RunContext,
   ownership: OwnershipMode,
   probeAndRefine = false,
+  preferences?: PreferencesStore,
 ): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
   const startMs = Date.now();
   store.resetRun();
   store.setRunStartMs(startMs);
-  store.addSetupNote(config ? 'config loaded' : 'no config');
+  if (config) store.addSetupNote('using config file');
 
   const agentsPath = path.join(root, 'AGENTS.md');
   if (!fs.existsSync(agentsPath)) {
@@ -134,7 +153,7 @@ async function runOnce(
 
     store.setPhase('optimizing');
     const optimizeResult = await tryOptimize(
-      ctx, kbContent, toolInstructions, config, baseContent, probeAndRefine,
+      ctx, kbContent, toolInstructions, config, baseContent, probeAndRefine, preferences,
     );
     finalContent = optimizeResult.content;
 
@@ -172,7 +191,7 @@ async function runOnce(
       store.addOutput('AGENTS.md written (KB-custom)');
       store.setSummary(summarizeContent(baseContent));
     }
-    store.addSetupNote('generation skipped');
+    store.addSetupNote('guidelines based on code analysis');
   }
 
   // ── 7. Optionally write kb.md ─────────────────────────────
@@ -241,25 +260,33 @@ function handleAssessmentAction(
   const dir = path.dirname(a.file) + '/';
 
   if (action.type === 'dismiss') {
+    // Dismiss → directory-scoped allow (broad: "this is fine here")
     prefs = addPreference(prefs, {
       rule: a.rule,
       pattern: a.message,
       disposition: 'allow',
       directory: dir,
+      details: a.details,
     });
     savePreferences(root, prefs);
     store.setPreferenceCount(prefs.preferences.length);
     store.setLearnedMessage(`Learned: ${a.rule} ok in ${dir}`);
     store.resolveAssessment('dismiss');
   } else if (action.type === 'confirm') {
+    // Confirm → file-scoped deny (specific: "this matters for this file")
     prefs = addPreference(prefs, {
       rule: a.rule,
       pattern: a.message,
       disposition: 'deny',
+      file: a.file,
       directory: dir,
+      details: a.details,
+      suggestion: a.suggestion,
     });
     savePreferences(root, prefs);
     store.setPreferenceCount(prefs.preferences.length);
+    store.setLearnedMessage(`Confirmed: ${a.rule} matters for ${a.file}`);
+    store.setRecommendProbe(true);
     store.resolveAssessment('confirm');
   } else if (action.type === 'skip') {
     store.advanceAssessment();
@@ -291,23 +318,6 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   log.blank();
   store.setPhase('watching');
 
-  // chokidar v4 is ESM-only. tsc compiles import() to require() in CJS output,
-  // which loads a non-functional CJS stub. Use Function() to bypass tsc's
-  // transform and get a real ESM import. Also resolve from this package's
-  // node_modules to avoid the workspace root's older hoisted version.
-  const esmImport = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>;
-  const { pathToFileURL } = await import('url');
-  const chokidarPath = require.resolve('chokidar', { paths: [__dirname] });
-  const chokidarModule = await esmImport(pathToFileURL(chokidarPath).href);
-  const chokidar = chokidarModule.default ?? chokidarModule;
-
-  const watcher = chokidar.watch('.', {
-    cwd: root,
-    ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
-    ignored: (watchedPath: string) => isIgnoredPath(path.resolve(root, watchedPath)),
-  });
-
   let evalTimer: NodeJS.Timeout | undefined;
   let pipelineRunning = false;
   let stopped = false;
@@ -318,8 +328,9 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   const doProbeAndRefine = async (): Promise<void> => {
     if (stopped || pipelineRunning) return;
     pipelineRunning = true;
+    store.setRecommendProbe(false);
     try {
-      await runOnce(ctx, ownership, true);
+      await runOnce(ctx, ownership, true, prefs);
       prefs = loadPreferences(root);
       store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
@@ -333,12 +344,18 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
   // ── Evaluate file changes (fast, no LLM) ──────────────────
 
+  const RECOMMEND_THRESHOLD = 10;
+
   const evaluateEvents = (events: FileChangeEvent[]): void => {
     const state = getRuntimeState();
     if (!state.model || !state.agentsContent) return;
 
     for (const event of events) {
       trackChange(event);
+
+      // Track add vs change counts
+      if (event.type === 'add') store.incrementAddCount();
+      else if (event.type === 'change') store.incrementChangeCount();
 
       if (event.type !== 'unlink') {
         try {
@@ -358,9 +375,19 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
         fileContents: state.fileContents,
       });
 
-      if (assessments.length > 0) {
-        store.pushAssessments(assessments);
+      store.pushAssessments(assessments);
+
+      // Change flash for clean changes
+      const hasNonOk = assessments.some((a) => a.type !== 'ok');
+      if (!hasNonOk) {
+        store.setLastChangeFlash(`${event.path} — ok`);
       }
+    }
+
+    // Auto-recommend probe-and-refine
+    const stats = store.state.assessmentStats;
+    if (stats.changes >= RECOMMEND_THRESHOLD && !store.state.recommendProbe) {
+      store.setRecommendProbe(true);
     }
   };
 
@@ -381,12 +408,10 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     }, EVAL_DEBOUNCE_MS);
   };
 
-  watcher.on('add', (p: string) => onFsEvent('add', p));
-  watcher.on('change', (p: string) => onFsEvent('change', p));
-  watcher.on('unlink', (p: string) => onFsEvent('unlink', p));
-  watcher.on('error', (e: unknown) => log.error(`Watcher error: ${String(e)}`));
+  // ── Start watcher (must be after onFsEvent is defined) ─────
 
-  await new Promise<void>((resolve) => watcher.once('ready', resolve));
+  const watcher = createFileWatcher(root, onFsEvent);
+  watcher.on('error', (e: unknown) => log.error(`Watcher error: ${String(e)}`));
 
   // ── Expose action handler for keyboard input ───────────────
   const onAssessmentAction = (action: AssessmentAction): void => {

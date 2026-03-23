@@ -26,12 +26,18 @@ export interface AspectCodeConfig {
     maxTokens?: number;
   };
 
-  /** Evaluator settings (probe-based quality assessment). */
+  /** Evaluator settings (probe-and-refine tuning). */
   evaluate?: {
     /** Enable probe and refine. Default: true when an API key is available. */
     enabled?: boolean;
-    /** Maximum probes per run. Default: 10. */
+    /** Maximum probes per iteration. Default: 10. */
     maxProbes?: number;
+    /** Maximum iterations for the probe-and-refine loop. Default: 3. */
+    maxIterations?: number;
+    /** Maximum edits applied per iteration. Default: 5. */
+    maxEditsPerIteration?: number;
+    /** Character budget for the AGENTS.md artifact. Default: 8000. */
+    charBudget?: number;
   };
 }
 

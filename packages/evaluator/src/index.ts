@@ -1,34 +1,44 @@
 /**
- * @aspectcode/evaluator — Evidence-based evaluation for AGENTS.md optimization.
+ * @aspectcode/evaluator — Probe-and-refine tuning for AGENTS.md.
  *
- * Probe-based micro-tests scoped to the knowledge base, prompt history
- * harvesting from AI coding tools, and evidence-driven diagnosis.
+ * Multi-iteration loop: LLM-generated probes, per-probe judging,
+ * aggregate diagnosis, and deterministic edit application.
  */
 
 // ── Types ───────────────────────────────────────────────────
 export type {
   Probe,
-  ProbeCategory,
-  ProbeResult,
-  BehaviorResult,
-  Diagnosis,
+  SimulationResult,
+  BehaviorReview,
+  JudgedProbeResult,
   AgentsEdit,
   ProbeGeneratorOptions,
   ProbeRunnerOptions,
-  ProbeEvaluatorOptions,
+  JudgeOptions,
   DiagnosisOptions,
-  EvaluationResult,
+  ProbeRefineConfig,
+  ProbeRefineResult,
+  IterationSummary,
+  ApplyResult,
+  ProbeProgressCallback,
   LlmProvider,
+  ChatOptions,
   OptLogger,
 } from './types';
+
+export { DEFAULT_PROBE_REFINE_CONFIG } from './types';
 
 // ── Probe generation ────────────────────────────────────────
 export { generateProbes } from './probes';
 
 // ── Probe execution ─────────────────────────────────────────
 export { runProbes } from './runner';
-export type { ProbeProgressCallback } from './runner';
 
-// ── Diagnosis ───────────────────────────────────────────────
-export { diagnose, applyDiagnosisEdits } from './diagnosis';
+// ── Per-probe judging ───────────────────────────────────────
+export { judgeProbe } from './judge';
 
+// ── Aggregate diagnosis ─────────────────────────────────────
+export { diagnose } from './diagnosis';
+
+// ── Deterministic edit application ──────────────────────────
+export { applyEdits, AGENTS_MD_CHAR_BUDGET } from './apply';

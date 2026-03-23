@@ -1,6 +1,7 @@
 export {
   generateCanonicalContentForMode,
   generateKbCustomContent,
+  generateKbSeedContent,
 } from './content';
 
 export type { AiToolId } from './formats';

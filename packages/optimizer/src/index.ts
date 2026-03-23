@@ -5,6 +5,7 @@
 export type {
   LlmProvider,
   ChatMessage,
+  ChatOptions,
   ChatUsage,
   ChatResult,
   ProviderOptions,

@@ -18,4 +18,5 @@ export * from './kb';
 export {
   generateCanonicalContentForMode,
   generateKbCustomContent,
+  generateKbSeedContent,
 } from './instructions/content';

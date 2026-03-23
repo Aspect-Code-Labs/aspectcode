@@ -58,6 +58,22 @@ function useLearnedMessage(msg: string): string {
   return visible;
 }
 
+// ── Auto-clear change flash ───────────────────────────────
+
+function useChangeFlash(msg: string): string {
+  const [visible, setVisible] = useState(msg);
+  useEffect(() => {
+    if (!msg) { setVisible(''); return; }
+    setVisible(msg);
+    const id = setTimeout(() => {
+      setVisible('');
+      store.setLastChangeFlash('');
+    }, 2000);
+    return () => clearTimeout(id);
+  }, [msg]);
+  return visible;
+}
+
 // ── Phase labels ─────────────────────────────────────────────
 
 const PHASE_TEXT: Record<PipelinePhase, string> = {
@@ -89,24 +105,55 @@ function statsText(s: DashboardState, liveElapsed: string): string {
   return parts.length > 0 ? parts.join(' · ') : '';
 }
 
+/** Primary eval progress line — shown with spinner during active refinement. */
 function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | null {
+  const round = s.iteration && s.maxIterations
+    ? `Round ${s.iteration}/${s.maxIterations}: `
+    : '';
   switch (phase) {
     case 'idle': return null;
-    case 'probing':
-      return s.probesPassed !== undefined && s.probesTotal !== undefined
-        ? `Probes: ${s.probesPassed}/${s.probesTotal} passed`
-        : 'Probing…';
-    case 'diagnosing':
-      return 'Refining…';
-    case 'done':
-      if (s.probesPassed !== undefined && s.probesTotal !== undefined) {
-        const parts = [`${s.probesPassed}/${s.probesTotal} probes passed`];
-        if (s.diagnosisEdits && s.diagnosisEdits > 0) {
-          parts.push(`${s.diagnosisEdits} fix${s.diagnosisEdits === 1 ? '' : 'es'} applied`);
-        }
-        return parts.join(' · ');
+    case 'generating-probes':
+      return `${round}Creating test scenarios…`;
+    case 'probing': {
+      const progress = s.probesPassed !== undefined && s.probesTotal !== undefined
+        ? ` (${s.probesPassed}/${s.probesTotal})`
+        : '';
+      const task = s.currentProbeTask ? ` — ${s.currentProbeTask}` : '';
+      return `${round}Testing guidelines${progress}…${task}`;
+    }
+    case 'judging': {
+      const progress = s.judgedCount !== undefined && s.probesTotal !== undefined
+        ? ` (${s.judgedCount}/${s.probesTotal})`
+        : '';
+      const task = s.currentProbeTask ? ` — ${s.currentProbeTask}` : '';
+      return `${round}Reviewing results${progress}…${task}`;
+    }
+    case 'diagnosing': {
+      const detail = s.weakCount !== undefined && s.strongCount !== undefined
+        ? ` — ${s.strongCount} passed, ${s.weakCount} gap${s.weakCount === 1 ? '' : 's'} found`
+        : '';
+      return `${round}Identifying improvements${detail}…`;
+    }
+    case 'applying': {
+      const count = s.proposedEditCount ? ` ${s.proposedEditCount}` : '';
+      return `${round}Applying${count} improvement${s.proposedEditCount === 1 ? '' : 's'} to AGENTS.md…`;
+    }
+    case 'done': {
+      const edits = s.diagnosisEdits ?? 0;
+      const rounds = s.iterationSummaries?.length ?? 0;
+      const roundNote = rounds > 1 ? ` across ${rounds} rounds` : '';
+      let label: string;
+      if (s.cancelled) {
+        label = edits > 0
+          ? `Refinement cancelled — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
+          : 'Refinement cancelled — no changes applied';
+      } else {
+        label = edits > 0
+          ? `Refinement complete — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
+          : 'Refinement complete — no changes needed';
       }
-      return null;
+      return `${label}  [c] clear`;
+    }
   }
 }
 
@@ -128,13 +175,25 @@ const Dashboard: React.FC = () => {
 
   // ── Keyboard handling ──────────────────────────────────────
   useInput((input: string, _key: Key) => {
+    // Global keys (no handler needed)
+    if (input === 'x') {
+      const evalPhase = store.state.evalStatus.phase;
+      if (evalPhase !== 'idle' && evalPhase !== 'done') {
+        store.cancelEval();
+      }
+      return;
+    }
+    if (input === 'c') {
+      store.dismissEvalStatus();
+      return;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = (store as any)._onAssessmentAction as ((a: any) => void) | undefined;
     if (!handler) return;
 
     const current = store.state.currentAssessment;
 
-    // Global keys
     if (input === 'r') {
       handler({ type: 'probe-and-refine' });
       return;
@@ -166,11 +225,10 @@ const Dashboard: React.FC = () => {
   const evalLabel = evalText(s.evalStatus.phase, s.evalStatus);
   const evalDone = s.evalStatus.phase === 'done';
   const evalActive = s.evalStatus.phase !== 'idle';
-  const allPassed = s.evalStatus.probesPassed === s.evalStatus.probesTotal;
-  const hasProbes = (s.evalStatus.probesTotal ?? 0) > 0;
   const isDone = s.phase === 'done' || s.phase === 'watching';
   const learnedMsg = useLearnedMessage(s.learnedMessage);
 
+  const changeFlash = useChangeFlash(s.lastChangeFlash);
   const current = s.currentAssessment;
   const queueLen = s.pendingAssessments.length;
   const aStats = s.assessmentStats;
@@ -202,20 +260,20 @@ const Dashboard: React.FC = () => {
 
       {/* ── Status line ──────────────────────────── */}
       <Box>
-        {working && (
+        {working && s.phase !== 'evaluating' && (
           <Text color={COLORS.primary}>{`  ${spinner} ${PHASE_TEXT[s.phase]}${detail}`}</Text>
         )}
         {s.phase === 'watching' && !current && (
-          <Text color={COLORS.green}>{'  * Watching'}</Text>
+          <Text color={COLORS.primary} bold>{'  ● Watching for changes'}</Text>
         )}
         {s.phase === 'done' && s.outputs.length > 0 && (
-          <Text color={COLORS.green}>{`  ✔ ${s.outputs.join(', ')}`}</Text>
+          <Text color={COLORS.primary}>{`  ● ${s.outputs.join(', ')}`}</Text>
         )}
         {s.phase === 'done' && s.outputs.length === 0 && (
-          <Text color={COLORS.green}>{'  ✔ Done'}</Text>
+          <Text color={COLORS.primary}>{'  ● Done'}</Text>
         )}
         {s.phase === 'error' && (
-          <Text color={COLORS.red}>{'  ✖ Error'}</Text>
+          <Text color={COLORS.yellow}>{'  ● Error'}</Text>
         )}
         {stats !== '' && !working && isDone && !current && (
           <Text color={COLORS.gray}>{`  ${stats}`}</Text>
@@ -223,10 +281,34 @@ const Dashboard: React.FC = () => {
       </Box>
 
       {/* ── Evaluator progress ────────────────────── */}
-      {evalActive && evalLabel && !(evalDone && !hasProbes) && (
-        <Text color={evalDone && allPassed ? COLORS.green : evalDone ? COLORS.yellow : COLORS.primaryDim}>
-          {`  ${evalLabel}`}
-        </Text>
+      {evalActive && evalLabel && !s.evalStatus.dismissed && (
+        <Box flexDirection="column">
+          {/* Primary eval line (with spinner when active, cancel hint) */}
+          <Text color={evalDone ? COLORS.primary : COLORS.primaryDim}>
+            {evalDone ? `  ${evalLabel}` : `  ${spinner} ${evalLabel}`}
+            {!evalDone && !s.evalStatus.cancelled ? '  [x] cancel' : ''}
+          </Text>
+
+          {/* Iteration summaries (accumulated, shown during and after loop) */}
+          {s.evalStatus.iterationSummaries && s.evalStatus.iterationSummaries.map((summary, i) => (
+            <Text key={`iter-${i}`} color={COLORS.gray}>{`  ├ ${summary}`}</Text>
+          ))}
+
+          {/* Edit summaries (shown when done) */}
+          {evalDone && s.evalStatus.editSummaries && s.evalStatus.editSummaries.length > 0 && (
+            <>
+              {s.evalStatus.editSummaries.slice(0, 5).map((line, i, arr) => {
+                const isLast = i === arr.length - 1 && (s.evalStatus.editSummaries?.length ?? 0) <= 5;
+                return (
+                  <Text key={`edit-${i}`} color={COLORS.gray}>{`  ${isLast ? '└' : '├'} ${line}`}</Text>
+                );
+              })}
+              {s.evalStatus.editSummaries.length > 5 && (
+                <Text color={COLORS.gray}>{`  └ +${s.evalStatus.editSummaries.length - 5} more`}</Text>
+              )}
+            </>
+          )}
+        </Box>
       )}
 
       {/* ── Token usage ──────────────────────────── */}
@@ -234,22 +316,6 @@ const Dashboard: React.FC = () => {
         <Text color={COLORS.gray}>
           {`  ${fmtTokens(s.tokenUsage.inputTokens)} in · ${fmtTokens(s.tokenUsage.outputTokens)} out`}
         </Text>
-      )}
-
-      {/* ── Content summary ──────────────────────── */}
-      {s.summary && isDone && !current && (
-        <Box flexDirection="column">
-          <Text color={COLORS.gray}>
-            {`  ├ ${s.summary.sections} sections · ${s.summary.rules} rules` +
-              (s.summary.filePaths.length > 0 ? ` · ${s.summary.filePaths.length} file-specific guidelines` : '')}
-          </Text>
-          {s.summary.filePaths.length > 0 && (
-            <Text color={COLORS.gray}>
-              {`  └ covers: ${s.summary.filePaths.slice(0, 3).join(', ')}` +
-                (s.summary.filePaths.length > 3 ? `, +${s.summary.filePaths.length - 3} more` : '')}
-            </Text>
-          )}
-        </Box>
       )}
 
       {/* ── Diff summary ─────────────────────────── */}
@@ -265,7 +331,7 @@ const Dashboard: React.FC = () => {
       {/* ── Warning ──────────────────────────────── */}
       {s.warning !== '' && (
         <Box marginTop={0}>
-          <Text color={COLORS.yellow}>{`  ! ${s.warning}`}</Text>
+          <Text color={COLORS.yellow}>{`  ● ${s.warning}`}</Text>
         </Box>
       )}
 
@@ -273,26 +339,10 @@ const Dashboard: React.FC = () => {
       {current && current.type === 'warning' && (
         <Box flexDirection="column" marginTop={1}>
           <Text color={COLORS.yellow} bold>
-            {`  ⚠ ${current.file}`}
+            {`  ● ${current.file}`}
             {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
           </Text>
           <Text color={COLORS.yellow}>{`    ${current.message}`}</Text>
-          {current.details && (
-            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
-          )}
-          <Text color={COLORS.gray}>
-            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
-          </Text>
-        </Box>
-      )}
-
-      {current && current.type === 'violation' && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color={COLORS.red} bold>
-            {`  ✖ ${current.file}`}
-            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
-          </Text>
-          <Text color={COLORS.red}>{`    ${current.message}`}</Text>
           {current.details && (
             <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
           )}
@@ -305,21 +355,53 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
+      {current && current.type === 'violation' && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={COLORS.yellow} bold>
+            {`  ● ${current.file}`}
+            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
+          </Text>
+          <Text color={COLORS.yellow}>{`    ${current.message}`}</Text>
+          {current.details && (
+            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
+          )}
+          {current.suggestion && (
+            <Text color={COLORS.gray}>{`    → ${current.suggestion}`}</Text>
+          )}
+          <Text color={COLORS.gray}>
+            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
+          </Text>
+        </Box>
+      )}
+
+      {/* ── Change flash (auto-clears) ──────────────── */}
+      {changeFlash !== '' && !current && (
+        <Text color={COLORS.primary}>{`  ● ${changeFlash}`}</Text>
+      )}
+
       {/* ── Learned message (auto-clears) ─────────── */}
       {learnedMsg !== '' && (
-        <Text color={COLORS.green}>{`  ✔ ${learnedMsg}`}</Text>
+        <Text color={COLORS.primary}>{`  ● ${learnedMsg}`}</Text>
+      )}
+
+      {/* ── Recommend probe-and-refine ────────────── */}
+      {s.recommendProbe && s.phase === 'watching' && !current && (
+        <Text color={COLORS.primary}>
+          {`  ↻ ${aStats.changes} changes since last run — press [r] to probe & refine AGENTS.md`}
+        </Text>
       )}
 
       {/* ══ v2: Persistent status line ════════════════ */}
       {isDone && s.phase === 'watching' && (
         <Box marginTop={1}>
-          <Text color={COLORS.gray}>
-            {`  aspect ● watching` +
-              ` · ${aStats.changes} changes` +
-              (aStats.warnings > 0 ? ` · ${aStats.warnings} warnings` : '') +
-              (s.preferenceCount > 0 ? ` · ${s.preferenceCount} learned` : '') +
-              ` · [r] probe and refine`}
+          <Text color={COLORS.white}>
+            {`  ${aStats.changes} changes` +
+              (s.addCount > 0 ? ` (${s.addCount} new)` : '') +
+              (aStats.warnings > 0 ? ` · ${aStats.warnings} needs review` : '') +
+              (s.preferenceCount > 0 ? ` · ${s.preferenceCount} preferences saved` : '') +
+              `  `}
           </Text>
+          <Text color={COLORS.primaryDim}>{'[r] probe & refine'}</Text>
         </Box>
       )}
     </Box>

@@ -498,6 +498,154 @@ If you encounter repeated errors or unexpected behavior:
 `.trim();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KB seed content — structured seed for probe-and-refine tuning
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Character budget for probe-and-refine seed. */
+const KB_SEED_CHAR_BUDGET = 8000;
+
+/**
+ * Generate a structured KB seed for the probe-and-refine loop.
+ *
+ * Produces the paper's format: Operating Mode + Procedural Standards +
+ * Repo Priors (from KB) + Guardrails — all within 3000 chars.
+ *
+ * This is the initial AGENTS.md that the iterative refinement process
+ * will improve through synthetic probes and diagnosis.
+ */
+export function generateKbSeedContent(
+  kbContent: string,
+  projectName = 'Project',
+): string {
+  const parts: string[] = [];
+
+  parts.push(`# AGENTS.md — ${projectName}`);
+
+  // ── Operating Mode (always present) ──────────────────────
+  parts.push(`## Operating Mode
+- Verify repo priors with targeted reads before editing.
+- Localize, trace deps, then apply minimal scoped edit.
+- Run the smallest relevant test first, broaden only if needed.`);
+
+  // ── Procedural Standards (always present) ────────────────
+  parts.push(`## Procedural Standards
+- Reproduce the failure before editing when possible.
+- Read target files and nearby callers before patching.
+- Keep first patch minimal; inspect call sites if public API changes.
+- Require evidence from file reads or command output — no fabricated edits.
+- Patches must be syntactically complete; remove unused imports.`);
+
+  // ── Repo Priors (from KB) ────────────────────────────────
+  const repoParts: string[] = [];
+
+  const hubs = extractKbSeedSection(kbContent, 'High-Risk Architectural Hubs', 5);
+  if (hubs) {
+    repoParts.push(`### High-Impact Hubs\n${hubs}`);
+  }
+
+  const entryPoints = extractKbSeedSection(kbContent, 'Entry Points', 5);
+  if (entryPoints) {
+    repoParts.push(`### Entry Points\n${entryPoints}`);
+  }
+
+  const validation = extractValidationSection(kbContent);
+  if (validation) {
+    repoParts.push(`### Validation\n${validation}`);
+  }
+
+  const integrations = extractKbSeedSection(kbContent, 'External Integrations', 4);
+  if (integrations) {
+    repoParts.push(`### Integration Risk\n${integrations}`);
+  }
+
+  const conventions = extractKbSeedSection(kbContent, 'Conventions', 5);
+  if (conventions) {
+    repoParts.push(`### Conventions\n${conventions}`);
+  }
+
+  if (repoParts.length > 0) {
+    parts.push(`## Repo Priors\n${repoParts.join('\n\n')}`);
+  }
+
+  // ── Guardrails (always present) ──────────────────────────
+  parts.push(`## Guardrails
+- No speculative changes or broad refactors without evidence.
+- Every touched file must tie to the diagnosed path.`);
+
+  let result = parts.join('\n\n') + '\n';
+
+  // Enforce budget — trim repo-specific content if over
+  if (result.length > KB_SEED_CHAR_BUDGET) {
+    result = result.slice(0, KB_SEED_CHAR_BUDGET - 20) + '\n[... truncated]\n';
+  }
+
+  return result;
+}
+
+/**
+ * Extract top N items from a KB section for the seed.
+ * Returns formatted bullet list or undefined.
+ */
+function extractKbSeedSection(kb: string, heading: string, maxItems: number): string | undefined {
+  const section = extractKbSection(kb, heading);
+  if (!section) return undefined;
+
+  // Extract bullet items or table rows
+  const bullets: string[] = [];
+
+  // Try bullet items first
+  for (const line of section.split('\n')) {
+    const trimmed = line.trim();
+    if (/^[-*]\s+/.test(trimmed)) {
+      bullets.push(trimmed);
+    }
+  }
+
+  // Try table rows if no bullets found
+  if (bullets.length === 0) {
+    const tableRegex = /\|\s*(?:\d+\s*\|)?\s*`([^`]+)`\s*\|/g;
+    let match: RegExpExecArray | null;
+    while ((match = tableRegex.exec(section)) !== null) {
+      bullets.push(`- \`${match[1]}\``);
+    }
+  }
+
+  if (bullets.length === 0) return undefined;
+  return bullets.slice(0, maxItems).join('\n');
+}
+
+/**
+ * Extract validation/testing info from KB.
+ * Combines test command, test directories, and fixture info.
+ */
+function extractValidationSection(kb: string): string | undefined {
+  const bullets: string[] = [];
+
+  // Look for test command mentions
+  const testCmdMatch = kb.match(/(?:test\s+command|run\s+tests?):\s*`([^`]+)`/i);
+  if (testCmdMatch) {
+    bullets.push(`- Test command: \`${testCmdMatch[1]}\``);
+  }
+
+  // Look for test directory mentions
+  const testDirMatch = kb.match(/(?:test\s+(?:dir(?:ectory|ectories)?|folder)):\s*`([^`]+)`/i);
+  if (testDirMatch) {
+    bullets.push(`- Test directory: \`${testDirMatch[1]}\``);
+  }
+
+  // Look for test patterns in directory layout
+  const testPaths = kb.match(/`(tests?\/[^`]*|__tests__\/[^`]*|spec\/[^`]*)`/g);
+  if (testPaths && bullets.length === 0) {
+    const unique = [...new Set(testPaths.map((p) => p.replace(/`/g, '')))].slice(0, 2);
+    for (const p of unique) {
+      bullets.push(`- Test path: \`${p}\``);
+    }
+  }
+
+  return bullets.length > 0 ? bullets.join('\n') : undefined;
+}
+
 export function generateCanonicalContentPermissiveKB(): string {
   return `## Aspect Code Knowledge Base
 

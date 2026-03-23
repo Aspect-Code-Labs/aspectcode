@@ -21,14 +21,58 @@ export type PipelinePhase =
   | 'error';
 
 /** Evaluator sub-phase for transparent progress reporting. */
-export type EvalPhase = 'idle' | 'probing' | 'diagnosing' | 'done';
+export type EvalPhase =
+  | 'idle'
+  | 'generating-probes'
+  | 'probing'
+  | 'judging'
+  | 'diagnosing'
+  | 'applying'
+  | 'done';
 
 /** Evaluator status shown in the dashboard. */
 export interface EvalStatus {
   phase: EvalPhase;
+  /** Current iteration in the probe-and-refine loop. */
+  iteration?: number;
+  /** Total iterations planned. */
+  maxIterations?: number;
+
+  // ── Probe progress ─────────────────────────────────────
   probesPassed?: number;
   probesTotal?: number;
+  /** Short task descriptions of generated probes. */
+  probeTasks?: string[];
+  /** Task description of the probe currently being tested/judged. */
+  currentProbeTask?: string;
+
+  // ── Judging progress ───────────────────────────────────
+  /** How many probes have been judged so far. */
+  judgedCount?: number;
+  /** Probes where all behaviors were strong. */
+  strongCount?: number;
+  /** Probes with at least one weak/missing behavior. */
+  weakCount?: number;
+
+  // ── Edits ──────────────────────────────────────────────
+  /** Total edits applied across all iterations. */
   diagnosisEdits?: number;
+  /** Edits proposed in the current iteration. */
+  proposedEditCount?: number;
+  /** Human-readable summaries of applied edits. */
+  editSummaries?: string[];
+
+  // ── Accumulated state ──────────────────────────────────
+  /** Why the loop converged early. */
+  convergedReason?: string;
+  /** Per-round summary lines (persist across iterations). */
+  iterationSummaries?: string[];
+
+  // ── UI state ───────────────────────────────────────────
+  /** True when the user has dismissed the eval result line. */
+  dismissed?: boolean;
+  /** True when the user has requested cancellation. */
+  cancelled?: boolean;
 }
 
 /** Summary of generated AGENTS.md content. */
@@ -97,6 +141,14 @@ export interface DashboardState {
   preferenceCount: number;
   /** Transient "Learned: ..." message, auto-clears. */
   learnedMessage: string;
+  /** True when the UI should recommend pressing [r] to regenerate. */
+  recommendProbe: boolean;
+  /** Transient "✔ file — ok" flash message, auto-clears. */
+  lastChangeFlash: string;
+  /** Count of 'add' events since last probe. */
+  addCount: number;
+  /** Count of 'change' events since last probe. */
+  changeCount: number;
 }
 
 /**
@@ -128,6 +180,10 @@ class DashboardStore extends EventEmitter {
     consecutiveOk: 0,
     preferenceCount: 0,
     learnedMessage: '',
+    recommendProbe: false,
+    lastChangeFlash: '',
+    addCount: 0,
+    changeCount: 0,
   };
 
   private update(patch: Partial<DashboardState>): void {
@@ -175,6 +231,14 @@ class DashboardStore extends EventEmitter {
 
   setEvalStatus(status: EvalStatus): void {
     this.update({ evalStatus: status });
+  }
+
+  dismissEvalStatus(): void {
+    this.update({ evalStatus: { ...this.state.evalStatus, dismissed: true } });
+  }
+
+  cancelEval(): void {
+    this.update({ evalStatus: { ...this.state.evalStatus, cancelled: true } });
   }
 
   setRunStartMs(ms: number): void {
@@ -254,6 +318,22 @@ class DashboardStore extends EventEmitter {
     this.update({ learnedMessage: msg });
   }
 
+  setRecommendProbe(recommend: boolean): void {
+    this.update({ recommendProbe: recommend });
+  }
+
+  setLastChangeFlash(msg: string): void {
+    this.update({ lastChangeFlash: msg });
+  }
+
+  incrementAddCount(): void {
+    this.update({ addCount: this.state.addCount + 1 });
+  }
+
+  incrementChangeCount(): void {
+    this.update({ changeCount: this.state.changeCount + 1 });
+  }
+
   /** Reset per-run state for a fresh pipeline run. */
   resetRun(): void {
     this.update({
@@ -269,6 +349,10 @@ class DashboardStore extends EventEmitter {
       tokenUsage: undefined,
       summary: undefined,
       diffSummary: undefined,
+      recommendProbe: false,
+      lastChangeFlash: '',
+      addCount: 0,
+      changeCount: 0,
     });
   }
 }

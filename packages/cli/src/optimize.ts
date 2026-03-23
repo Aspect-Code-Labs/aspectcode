@@ -1,29 +1,38 @@
 /**
  * Optimize wrapper — tries LLM optimization, falls back to static content.
  *
- * - If an API key is available → run the generation agent
- * - If probeAndRefine=true → single-pass generate then probe & diagnose
+ * - If an API key is available → generate seed AGENTS.md from KB
+ * - If probeAndRefine=true → run multi-iteration probe-and-refine loop
  * - If no API key → warn and write static AGENTS.md content
  */
 
 import {
   resolveProvider,
   loadEnvFile,
-  runGenerateAgent,
 } from '@aspectcode/optimizer';
-import type { ProviderOptions, OptimizeStep, ChatUsage } from '@aspectcode/optimizer';
+import type { ProviderOptions, ChatUsage } from '@aspectcode/optimizer';
 import {
   generateProbes,
   runProbes,
+  judgeProbe,
   diagnose,
-  applyDiagnosisEdits,
+  applyEdits,
+  DEFAULT_PROBE_REFINE_CONFIG,
 } from '@aspectcode/evaluator';
-import type { ProbeProgressCallback } from '@aspectcode/evaluator';
-import { generateCanonicalContentForMode, generateKbCustomContent } from '@aspectcode/emitters';
+import type {
+  ProbeProgressCallback,
+  ProbeRefineConfig,
+  JudgedProbeResult,
+  AgentsEdit,
+} from '@aspectcode/evaluator';
+import { generateCanonicalContentForMode, generateKbCustomContent, generateKbSeedContent } from '@aspectcode/emitters';
 import type { RunContext } from './cli';
 import type { AspectCodeConfig } from './config';
 import { fmt } from './logger';
 import { store } from './ui/store';
+import type { PreferencesStore } from './preferences';
+import { formatPreferencesForPrompt } from './preferences';
+import * as path from 'path';
 
 /** Result of the optimization attempt. */
 export interface OptimizeOutput {
@@ -36,16 +45,17 @@ export interface OptimizeOutput {
  * Try to generate AGENTS.md content via LLM using static analysis as context.
  * Falls back to static instruction content when no API key is available.
  *
- * @param probeAndRefine  When true, run probe-based evaluation after generation
- *                        and auto-fix failures. Only used on first run or manual rerun.
+ * @param probeAndRefine  When true, run the multi-iteration probe-and-refine loop
+ *                        after generating the seed. Only on first run or manual rerun.
  */
 export async function tryOptimize(
   ctx: RunContext,
   kbContent: string,
-  toolInstructions: Map<string, string>,
+  _toolInstructions: Map<string, string>,
   config: AspectCodeConfig | undefined,
-  baseContent: string,
+  _baseContent: string,
   probeAndRefine = false,
+  preferences?: PreferencesStore,
 ): Promise<OptimizeOutput> {
   const { flags, log, root } = ctx;
   const optConfig = config?.optimize;
@@ -80,7 +90,7 @@ export async function tryOptimize(
   try {
     provider = resolveProvider(env, providerOptions);
   } catch {
-    store.addSetupNote('no API key — static mode');
+    store.addSetupNote('no API key found — using built-in rules');
     log.warn(
       'No LLM API key found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env for optimization.',
     );
@@ -91,33 +101,12 @@ export async function tryOptimize(
   }
 
   const providerLabel = model ? `${provider.name} (${model})` : provider.name;
-  store.addSetupNote('API key found');
+  store.addSetupNote('LLM connected');
   if (evaluatorEnabled) {
-    store.addSetupNote('probe and refine');
+    store.addSetupNote('probe-and-refine enabled');
   }
   log.info(`Generating with ${fmt.cyan(provider.name)}${model ? ` (${fmt.cyan(model)})` : ''}…`);
   store.setProvider(providerLabel);
-
-  const fallbackContent = baseContent;
-
-  // ── Build tool instructions context string ────────────────
-  let toolContext = '';
-  if (toolInstructions.size > 0) {
-    const parts: string[] = [];
-    for (const [tool, content] of toolInstructions) {
-      parts.push(`### ${tool}\n${content}`);
-    }
-    toolContext = parts.join('\n\n');
-  }
-
-  // ── Progress callbacks ────────────────────────────────────
-  const onProgress = (step: OptimizeStep): void => {
-    if (step.kind === 'generating') {
-      store.setPhase('optimizing', 'generating AGENTS.md…');
-    } else if (step.kind === 'done') {
-      store.setPhase('optimizing', 'generation complete');
-    }
-  };
 
   const optLog = flags.quiet ? undefined : {
     info(msg: string)  { log.info(msg); },
@@ -126,78 +115,345 @@ export async function tryOptimize(
     debug(msg: string) { log.debug(msg); },
   };
 
-  // ── Generate ──────────────────────────────────────────────
-
-  const result = await runGenerateAgent({
-    currentInstructions: fallbackContent,
-    kb: kbContent,
-    toolInstructions: toolContext || undefined,
-    provider,
-    log: optLog,
-    onProgress,
-  });
-
-  if (result.usage) {
-    store.setTokenUsage(result.usage);
+  // ── Enrich KB with user preferences ─────────────────────
+  let enrichedKb = kbContent;
+  if (preferences) {
+    const prefBlock = formatPreferencesForPrompt(preferences);
+    if (prefBlock) enrichedKb = kbContent + '\n\n' + prefBlock;
   }
 
-  // ── Probe and refine (only when explicitly requested) ─────
-  let finalContent = result.optimizedInstructions;
+  // ── Generate seed AGENTS.md ─────────────────────────────
+
+  const projectName = path.basename(root);
+  store.setPhase('optimizing', 'generating seed AGENTS.md…');
+
+  let finalContent: string;
+  if (evaluatorEnabled) {
+    // Use the structured KB seed format for probe-and-refine
+    finalContent = generateKbSeedContent(enrichedKb, projectName);
+    log.info('Generated KB seed for probe-and-refine tuning');
+  } else {
+    // Use KB-custom content when not doing probe-and-refine
+    finalContent = enrichedKb.length > 0
+      ? generateKbCustomContent(enrichedKb, 'safe')
+      : generateCanonicalContentForMode('safe', false);
+  }
+
+  store.setPhase('optimizing', 'generation complete');
+
+  // ── Probe-and-refine loop ──────────────────────────────────
 
   if (evaluatorEnabled) {
+    const allAppliedEdits: AgentsEdit[] = [];
+    const iterationSummaries: string[] = [];
+    let totalEditsApplied = 0;
+
+    // ── Abort controller for immediate cancellation ──────
+    const abortController = new AbortController();
+    const { signal } = abortController;
+
+    const onStoreChange = () => {
+      if (store.state.evalStatus.cancelled && !signal.aborted) {
+        abortController.abort();
+      }
+    };
+    store.on('change', onStoreChange);
+
     try {
-      store.setPhase('evaluating');
-      store.setEvalStatus({ phase: 'probing' });
-
-      const maxProbes = evalConfig?.maxProbes ?? 10;
-      const probes = generateProbes({ kb: kbContent, maxProbes });
-
-      const onProbeProgress: ProbeProgressCallback = (info) => {
-        if (info.phase === 'starting') {
-          store.setEvalStatus({ phase: 'probing', probesTotal: info.total });
-          store.setPhase('evaluating', `probe ${info.probeIndex + 1}/${info.total}: ${info.probeId}`);
-        } else {
-          store.setPhase('evaluating', `probe ${info.probeIndex + 1}/${info.total} ${info.passed ? '✔' : '✖'}`);
-        }
+      const loopConfig: ProbeRefineConfig = {
+        maxIterations: evalConfig?.maxIterations ?? DEFAULT_PROBE_REFINE_CONFIG.maxIterations,
+        targetProbesPerIteration: evalConfig?.maxProbes ?? DEFAULT_PROBE_REFINE_CONFIG.targetProbesPerIteration,
+        maxEditsPerIteration: evalConfig?.maxEditsPerIteration ?? DEFAULT_PROBE_REFINE_CONFIG.maxEditsPerIteration,
+        charBudget: evalConfig?.charBudget ?? DEFAULT_PROBE_REFINE_CONFIG.charBudget,
       };
 
-      const probeResults = await runProbes(
-        finalContent, probes, provider,
-        undefined, optLog, undefined, onProbeProgress,
-      );
+      store.setPhase('evaluating');
 
-      const failures = probeResults.filter((r) => !r.passed);
-      const passCount = probeResults.length - failures.length;
+      const priorTasks: string[] = [];
+      let noChangeStreak = 0;
+      let probeExhaustionStreak = 0;
+      let convergedReason: string | undefined;
 
-      store.setEvalStatus({ phase: 'probing', probesPassed: passCount, probesTotal: probeResults.length });
+      /** Cooperative cancel check — returns true if the user pressed [x]. */
+      const isCancelled = () => signal.aborted;
 
-      if (failures.length > 0) {
-        store.setEvalStatus({ phase: 'diagnosing' });
-        store.setPhase('evaluating', 'refining…');
+      /** Preserves iterationSummaries across setEvalStatus calls. */
+      const setEval = (status: Omit<import('./ui/store').EvalStatus, 'iterationSummaries' | 'cancelled'>) => {
+        store.setEvalStatus({
+          ...status,
+          iterationSummaries: iterationSummaries.length > 0 ? [...iterationSummaries] : undefined,
+          cancelled: signal.aborted,
+        });
+      };
 
-        const diagnosis = await diagnose(failures, finalContent, provider, optLog);
+      for (let iteration = 1; iteration <= loopConfig.maxIterations; iteration++) {
+        if (isCancelled()) break;
+        log.info(`\n── Iteration ${iteration}/${loopConfig.maxIterations} ──`);
 
-        if (diagnosis && diagnosis.edits.length > 0) {
-          store.setPhase('evaluating', 'applying fixes');
-          const fixed = await applyDiagnosisEdits(finalContent, diagnosis, provider, optLog);
-          finalContent = fixed.content;
+        // ── Step 1: Generate probes ──────────────────────
+        setEval({
+          phase: 'generating-probes',
+          iteration,
+          maxIterations: loopConfig.maxIterations,
+        });
+        store.setPhase('evaluating');
+
+        const probes = await generateProbes({
+          kb: enrichedKb,
+          currentAgentsMd: finalContent,
+          priorProbeTasks: priorTasks,
+          maxProbes: loopConfig.targetProbesPerIteration,
+          provider,
+          projectName,
+          log: optLog,
+          signal,
+        });
+
+        if (isCancelled()) break;
+
+        // Track prior tasks for cross-iteration dedup
+        for (const p of probes) priorTasks.push(p.task);
+
+        if (probes.length === 0) {
+          probeExhaustionStreak++;
+          log.info(`No new probes generated (streak: ${probeExhaustionStreak})`);
+          if (probeExhaustionStreak >= 2) {
+            convergedReason = 'probe diversity exhausted';
+            log.info(`Converged: ${convergedReason}`);
+            break;
+          }
+          continue;
+        } else {
+          probeExhaustionStreak = 0;
         }
 
-        store.setEvalStatus({
-          phase: 'done',
-          probesPassed: passCount,
-          probesTotal: probeResults.length,
-          diagnosisEdits: diagnosis?.edits.length ?? 0,
+        // ── Step 2: Simulate probes ──────────────────────
+        const probeTasks = probes.map((p) => p.task);
+        setEval({
+          phase: 'probing',
+          iteration,
+          maxIterations: loopConfig.maxIterations,
+          probesTotal: probes.length,
+          probeTasks,
         });
+        store.setPhase('evaluating');
+
+        const onProbeProgress: ProbeProgressCallback = (info) => {
+          const currentTask = probes[info.probeIndex]?.task;
+          const brief = currentTask && currentTask.length > 60
+            ? currentTask.slice(0, 57) + '...'
+            : currentTask;
+          setEval({
+            phase: 'probing',
+            iteration,
+            maxIterations: loopConfig.maxIterations,
+            probesPassed: info.probeIndex + (info.phase === 'done' ? 1 : 0),
+            probesTotal: info.total,
+            probeTasks,
+            currentProbeTask: brief,
+          });
+        };
+
+        const simResults = await runProbes(
+          finalContent, probes, provider, optLog, signal, onProbeProgress,
+        );
+
+        if (isCancelled()) break;
+
+        // ── Step 3: Judge each probe ─────────────────────
+        setEval({
+          phase: 'judging',
+          iteration,
+          maxIterations: loopConfig.maxIterations,
+          probesTotal: simResults.length,
+          judgedCount: 0,
+          weakCount: 0,
+          strongCount: 0,
+        });
+        store.setPhase('evaluating');
+
+        const judgedResults: JudgedProbeResult[] = [];
+        let weakCount = 0;
+        let strongCount = 0;
+
+        for (let i = 0; i < simResults.length; i++) {
+          if (isCancelled()) break;
+          const sim = simResults[i];
+          const probe = probes[i];
+          if (!sim.response) continue;
+
+          const judged = await judgeProbe({
+            task: sim.task,
+            response: sim.response,
+            expectedBehaviors: probe.expectedBehaviors,
+            probeId: sim.probeId,
+            provider,
+            log: optLog,
+            signal,
+          });
+          judgedResults.push(judged);
+
+          const hasWeak = judged.behaviorReviews.some((b) => b.assessment !== 'strong');
+          if (hasWeak) weakCount++;
+          else strongCount++;
+
+          const briefTask = sim.task.length > 50 ? sim.task.slice(0, 47) + '...' : sim.task;
+          setEval({
+            phase: 'judging',
+            iteration,
+            maxIterations: loopConfig.maxIterations,
+            probesTotal: simResults.length,
+            judgedCount: i + 1,
+            weakCount,
+            strongCount,
+            currentProbeTask: briefTask,
+          });
+
+          log.info(`  ${hasWeak ? '✖' : '✔'} ${sim.probeId} (${hasWeak ? 'weak' : 'strong'})`);
+        }
+
+        if (isCancelled()) break;
+
+        // ── Step 4: Aggregate diagnosis ──────────────────
+        setEval({
+          phase: 'diagnosing',
+          iteration,
+          maxIterations: loopConfig.maxIterations,
+          weakCount,
+          strongCount,
+          probesTotal: judgedResults.length,
+        });
+        store.setPhase('evaluating');
+
+        const diagnosisEdits = await diagnose({
+          judgedResults,
+          agentsContent: finalContent,
+          provider,
+          log: optLog,
+          signal,
+        });
+
+        if (isCancelled()) break;
+
+        // Merge per-probe edits + diagnosis edits, deduplicate
+        const allEdits: AgentsEdit[] = [];
+        for (const jr of judgedResults) {
+          allEdits.push(...jr.proposedEdits);
+        }
+        allEdits.push(...diagnosisEdits);
+
+        // Deduplicate by content similarity
+        const seen = new Set<string>();
+        const dedupedEdits: AgentsEdit[] = [];
+        for (const edit of allEdits) {
+          const key = `${edit.section}:${edit.action}:${edit.content.toLowerCase().trim()}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            dedupedEdits.push(edit);
+          }
+        }
+
+        const cappedEdits = dedupedEdits.slice(0, loopConfig.maxEditsPerIteration);
+        log.info(`Applying ${cappedEdits.length} edits (${allEdits.length} total, ${dedupedEdits.length} unique)`);
+
+        // ── Step 5: Apply edits deterministically ────────
+        setEval({
+          phase: 'applying',
+          iteration,
+          maxIterations: loopConfig.maxIterations,
+          proposedEditCount: cappedEdits.length,
+        });
+        store.setPhase('evaluating');
+
+        const guidanceBefore = finalContent;
+        const applyResult = applyEdits(finalContent, cappedEdits, loopConfig.charBudget);
+        finalContent = applyResult.content;
+        totalEditsApplied += applyResult.applied;
+        allAppliedEdits.push(...cappedEdits.slice(0, applyResult.applied));
+
+        if (applyResult.trimmed > 0) {
+          log.info(`Trimmed ${applyResult.trimmed} bullets to fit ${loopConfig.charBudget}-char budget`);
+        }
+
+        // ── Step 6: Convergence check ────────────────────
+        const guidanceChanged = finalContent !== guidanceBefore;
+        if (guidanceChanged) {
+          noChangeStreak = 0;
+          log.info(`Guidance updated (${guidanceBefore.length} → ${finalContent.length} chars)`);
+        } else {
+          noChangeStreak++;
+          log.info(`No guidance change (streak: ${noChangeStreak})`);
+        }
+
+        // Build iteration summary
+        const roundParts: string[] = [];
+        roundParts.push(`${probes.length} scenarios`);
+        if (weakCount > 0) roundParts.push(`${weakCount} gap${weakCount === 1 ? '' : 's'}`);
+        else roundParts.push('all passed');
+        if (applyResult.applied > 0) roundParts.push(`${applyResult.applied} improvement${applyResult.applied === 1 ? '' : 's'}`);
+        iterationSummaries.push(`Round ${iteration}: ${roundParts.join(', ')}`);
+
+        if (noChangeStreak >= 2) {
+          convergedReason = 'guidance converged (no changes)';
+          log.info(`Converged: ${convergedReason}`);
+          break;
+        }
+      }
+
+      const editSummaries = allAppliedEdits.map((e) => {
+        const verb = { add: 'Added', remove: 'Removed', strengthen: 'Strengthened', modify: 'Updated' }[e.action];
+        const brief = e.content.length > 60 ? e.content.slice(0, 57) + '...' : e.content;
+        return `${verb}: ${brief} (${e.section})`;
+      });
+
+      const wasCancelled = isCancelled();
+
+      store.setEvalStatus({
+        phase: 'done',
+        iteration: loopConfig.maxIterations,
+        maxIterations: loopConfig.maxIterations,
+        diagnosisEdits: totalEditsApplied,
+        convergedReason: wasCancelled ? undefined : convergedReason,
+        editSummaries,
+        iterationSummaries: iterationSummaries.length > 0 ? iterationSummaries : undefined,
+        cancelled: wasCancelled,
+      });
+
+      store.removeListener('change', onStoreChange);
+
+      if (wasCancelled) {
+        log.info(`Probe-and-refine cancelled by user (${totalEditsApplied} edits applied)`);
+      } else if (convergedReason) {
+        log.info(`Probe-and-refine complete: ${convergedReason}`);
       } else {
-        store.setEvalStatus({ phase: 'done', probesPassed: passCount, probesTotal: probeResults.length, diagnosisEdits: 0 });
+        log.info(`Probe-and-refine complete: max iterations reached`);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.warn(`Probe and refine failed (non-fatal): ${msg}`);
+      // Clean up abort listener if we exit via exception
+      store.removeListener('change', onStoreChange);
+
+      // AbortError from cancel — not a real error
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        const editSummaries = allAppliedEdits.map((e) => {
+          const verb = { add: 'Added', remove: 'Removed', strengthen: 'Strengthened', modify: 'Updated' }[e.action];
+          const brief = e.content.length > 60 ? e.content.slice(0, 57) + '...' : e.content;
+          return `${verb}: ${brief} (${e.section})`;
+        });
+        store.setEvalStatus({
+          phase: 'done',
+          diagnosisEdits: totalEditsApplied,
+          editSummaries,
+          iterationSummaries: iterationSummaries.length > 0 ? iterationSummaries : undefined,
+          cancelled: true,
+        });
+        log.info(`Probe-and-refine cancelled by user (${totalEditsApplied} edits applied)`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`Probe and refine failed (non-fatal): ${msg}`);
+      }
     }
   }
 
-  store.setReasoning(result.reasoning);
-  return { content: finalContent, reasoning: result.reasoning, tokenUsage: result.usage };
+  store.setReasoning([]);
+  return { content: finalContent, reasoning: [] };
 }

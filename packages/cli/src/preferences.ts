@@ -26,6 +26,12 @@ export interface LearnedPreference {
   directory?: string;
   /** ISO-8601 timestamp. */
   createdAt: string;
+  /** What kind of file change triggered this assessment. */
+  triggerEvent?: 'add' | 'change' | 'unlink';
+  /** The assessment's details string (e.g. "Tests usually live in: test/"). */
+  details?: string;
+  /** The assessment's suggestion (for deny dispositions). */
+  suggestion?: string;
 }
 
 export interface PreferencesStore {
@@ -76,7 +82,7 @@ export function addPreference(
   pref: Omit<LearnedPreference, 'id' | 'createdAt'>,
 ): PreferencesStore {
   const id = crypto.createHash('sha256')
-    .update(`${pref.rule}:${pref.pattern}:${pref.file ?? ''}:${pref.directory ?? ''}`)
+    .update(`${pref.rule}:${pref.pattern}:${pref.file ?? ''}:${pref.directory ?? ''}:${pref.triggerEvent ?? ''}`)
     .digest('hex')
     .slice(0, 12);
 
@@ -125,4 +131,22 @@ export function checkPreference(
   if (ruleMatch) return ruleMatch.disposition;
 
   return null;
+}
+
+// ── Formatting ──────────────────────────────────────────────
+
+/**
+ * Format confirmed (deny) preferences as natural language hints for the LLM.
+ * Returns empty string if no deny preferences exist.
+ */
+export function formatPreferencesForPrompt(store: PreferencesStore): string {
+  const denied = store.preferences.filter((p) => p.disposition === 'deny');
+  if (denied.length === 0) return '';
+
+  const lines = denied.map((p) => {
+    const scope = p.file ? `in \`${p.file}\`` : p.directory ? `in \`${p.directory}\`` : 'project-wide';
+    return `- The developer confirmed that "${p.rule}" should be enforced ${scope}: ${p.pattern}`;
+  });
+
+  return `## Developer preferences\n\nThese rules were explicitly confirmed by the developer during watch mode:\n\n${lines.join('\n')}`;
 }
