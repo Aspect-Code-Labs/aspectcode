@@ -33,7 +33,6 @@ export function parseArgs(argv: string[]): CliFlags {
     version: false,
     verbose: false,
     quiet: false,
-    kb: false,
     dryRun: false,
     once: false,
     noColor: false,
@@ -100,7 +99,6 @@ ${optionLines.join('\n')}
 ${fmt.bold('EXAMPLES')}
   aspectcode                      ${fmt.dim('# watch & auto-update AGENTS.md')}
   aspectcode --once               ${fmt.dim('# run once then exit')}
-  aspectcode --once --kb          ${fmt.dim('# also write kb.md')}
   aspectcode --once --dry-run     ${fmt.dim('# preview without writing')}
   aspectcode --provider openai    ${fmt.dim('# force specific LLM provider')}
   aspectcode --compact            ${fmt.dim('# minimal dashboard layout')}

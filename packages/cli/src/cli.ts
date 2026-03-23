@@ -36,7 +36,6 @@ export const FLAG_DEFS: readonly FlagDef[] = [
   { name: 'verbose',          short: 'v', type: 'boolean', description: 'Show debug output' },
   { name: 'quiet',            short: 'q', type: 'boolean', description: 'Suppress non-error output' },
   { name: 'root',             short: 'r', type: 'string',  description: 'Workspace root (default: cwd)' },
-  { name: 'kb',                           type: 'boolean', description: 'Also write kb.md to disk' },
   { name: 'dry-run',                      type: 'boolean', description: 'Print output without writing', prop: 'dryRun' },
   { name: 'once',                         type: 'boolean', description: 'Run once then exit (no watch)' },
   { name: 'no-color',                     type: 'boolean', description: 'Disable colored output', prop: 'noColor' },
@@ -55,7 +54,6 @@ export interface CliFlags {
   verbose: boolean;
   quiet: boolean;
   root?: string;
-  kb: boolean;
   dryRun: boolean;
   once: boolean;
   noColor: boolean;

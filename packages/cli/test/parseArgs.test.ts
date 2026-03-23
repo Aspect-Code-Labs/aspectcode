@@ -14,7 +14,6 @@ describe('parseArgs', () => {
     assert.equal(r.version, false);
     assert.equal(r.verbose, false);
     assert.equal(r.quiet, false);
-    assert.equal(r.kb, false);
     assert.equal(r.dryRun, false);
     assert.equal(r.once, false);
     assert.equal(r.noColor, false);
@@ -57,11 +56,6 @@ describe('parseArgs', () => {
   it('parses -r short alias for root', () => {
     const r = parseArgs([...base, '-r', '/my/dir']);
     assert.equal(r.root, '/my/dir');
-  });
-
-  it('parses --kb flag', () => {
-    const r = parseArgs([...base, '--kb']);
-    assert.equal(r.kb, true);
   });
 
   it('parses --dry-run flag', () => {
@@ -111,9 +105,8 @@ describe('parseArgs', () => {
   });
 
   it('parses combined flags', () => {
-    const r = parseArgs([...base, '--once', '--kb', '--dry-run', '-v']);
+    const r = parseArgs([...base, '--once', '--dry-run', '-v']);
     assert.equal(r.once, true);
-    assert.equal(r.kb, true);
     assert.equal(r.dryRun, true);
     assert.equal(r.verbose, true);
   });
