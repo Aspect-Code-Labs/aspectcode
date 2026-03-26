@@ -89,7 +89,28 @@ export interface DiffSummary {
   changed: boolean;
 }
 
+/** A managed file tracked in the memory map. */
+export interface ManagedFile {
+  /** Display path (e.g. "AGENTS.md", "~/.claude/CLAUDE.md") */
+  path: string;
+  /** Short annotation (e.g. "hub safety (3 rules)", "12 learned") */
+  annotation: string;
+  /** Epoch ms when last updated, 0 if never */
+  updatedAt: number;
+  /** Category for grouping */
+  category: 'agents' | 'claude-rule' | 'cursor-rule' | 'aspectcode' | 'cloud'
+           | 'device' | 'user-rule' | 'workspace-config';
+  /** Where this file lives — device (~/.claude/) vs workspace (./) */
+  scope: 'device' | 'workspace';
+  /** Who owns this file */
+  owner: 'aspectcode' | 'user' | 'device';
+}
+
 export interface DashboardState {
+  /** Workspace root path. */
+  rootPath: string;
+  /** Active AI platform ('claude' | 'cursor' | ''). */
+  activePlatform: string;
   phase: PipelinePhase;
   /** Human-readable label for the current sub-step (e.g. "iteration 2/3"). */
   phaseDetail: string;
@@ -149,6 +170,14 @@ export interface DashboardState {
   addCount: number;
   /** Count of 'change' events since last probe. */
   changeCount: number;
+  /** Number of unprocessed corrections for dream cycle. */
+  correctionCount: number;
+  /** True when dream cycle prompt should show. */
+  dreamPrompt: boolean;
+  /** True when dream cycle is running. */
+  dreaming: boolean;
+  /** Managed files for the memory map. */
+  managedFiles: ManagedFile[];
 }
 
 /**
@@ -156,6 +185,8 @@ export interface DashboardState {
  */
 class DashboardStore extends EventEmitter {
   state: DashboardState = {
+    rootPath: '',
+    activePlatform: '',
     phase: 'idle',
     phaseDetail: '',
     fileCount: 0,
@@ -184,11 +215,23 @@ class DashboardStore extends EventEmitter {
     lastChangeFlash: '',
     addCount: 0,
     changeCount: 0,
+    correctionCount: 0,
+    dreamPrompt: false,
+    dreaming: false,
+    managedFiles: [],
   };
 
   private update(patch: Partial<DashboardState>): void {
     Object.assign(this.state, patch);
     this.emit('change');
+  }
+
+  setRootPath(rootPath: string): void {
+    this.update({ rootPath });
+  }
+
+  setPlatform(platform: string): void {
+    this.update({ activePlatform: platform });
   }
 
   setPhase(phase: PipelinePhase, detail = ''): void {
@@ -334,6 +377,32 @@ class DashboardStore extends EventEmitter {
     this.update({ changeCount: this.state.changeCount + 1 });
   }
 
+  setCorrectionCount(n: number): void {
+    this.update({ correctionCount: n });
+  }
+
+  setDreamPrompt(show: boolean): void {
+    this.update({ dreamPrompt: show });
+  }
+
+  setDreaming(dreaming: boolean): void {
+    this.update({ dreaming });
+  }
+
+  setManagedFiles(files: ManagedFile[]): void {
+    this.update({ managedFiles: files });
+  }
+
+  /** Update a single managed file's annotation or timestamp. */
+  touchManagedFile(filePath: string, annotation?: string): void {
+    const files = this.state.managedFiles.map((f) =>
+      f.path === filePath
+        ? { ...f, updatedAt: Date.now(), ...(annotation !== undefined ? { annotation } : {}) }
+        : f,
+    );
+    this.update({ managedFiles: files });
+  }
+
   /** Reset per-run state for a fresh pipeline run. */
   resetRun(): void {
     this.update({
@@ -353,6 +422,8 @@ class DashboardStore extends EventEmitter {
       lastChangeFlash: '',
       addCount: 0,
       changeCount: 0,
+      dreamPrompt: false,
+      dreaming: false,
     });
   }
 }

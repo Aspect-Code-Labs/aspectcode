@@ -30,6 +30,20 @@ import { loadPreferences, savePreferences, addPreference } from './preferences';
 import type { PreferencesStore } from './preferences';
 import { evaluateChange, trackChange, getRecentChanges } from './changeEvaluator';
 import type { ChangeAssessment } from './changeEvaluator';
+import {
+  addCorrection,
+  shouldDream,
+  getCorrections,
+  markProcessed,
+  getUnprocessedCount,
+  deriveLearnedRule,
+  appendLearnedRule,
+  runDreamCycle,
+  saveDreamState,
+} from './dreamCycle';
+import { extractScopedRules, writeScopedRules } from './scopedRules';
+import type { ManagedFile } from './ui/store';
+import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -50,6 +64,165 @@ export function isIgnoredPath(filePath: string): boolean {
 export function isSupportedSourceFile(filePath: string): boolean {
   const ext = path.extname(filePath).toLowerCase();
   return SUPPORTED_EXTENSIONS.includes(ext);
+}
+
+// ── Managed files for memory map ─────────────────────────────
+
+function fileMtime(filePath: string): number {
+  try { return fs.statSync(filePath).mtimeMs; } catch { return 0; }
+}
+
+function buildManagedFiles(
+  root: string,
+  preferenceCount: number,
+  platform: 'claude' | 'cursor' | '' = '',
+): ManagedFile[] {
+  const files: ManagedFile[] = [];
+
+  // ── Workspace-scope: AGENTS.md ──────────────────────────────
+  const agentsAbs = path.join(root, 'AGENTS.md');
+  if (fs.existsSync(agentsAbs)) {
+    files.push({ path: 'AGENTS.md', annotation: '', updatedAt: fileMtime(agentsAbs), category: 'agents', scope: 'workspace', owner: 'aspectcode' });
+  }
+
+  // ── Workspace-scope: platform instruction files ─────────────
+  if (platform === 'claude') {
+    const claudeMdAbs = path.join(root, 'CLAUDE.md');
+    if (fs.existsSync(claudeMdAbs)) {
+      files.push({ path: 'CLAUDE.md', annotation: '○ user', updatedAt: fileMtime(claudeMdAbs), category: 'workspace-config', scope: 'workspace', owner: 'user' });
+    }
+  } else if (platform === 'cursor') {
+    const cursorrules = path.join(root, '.cursorrules');
+    if (fs.existsSync(cursorrules)) {
+      files.push({ path: '.cursorrules', annotation: '○ user', updatedAt: fileMtime(cursorrules), category: 'workspace-config', scope: 'workspace', owner: 'user' });
+    }
+  }
+
+  // ── Workspace-scope: scoped rules from manifest ─────────────
+  const manifestPath = path.join(root, '.aspectcode', 'scoped-rules.json');
+  const manifestRulePaths = new Set<string>();
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      for (const entry of manifest.rules ?? []) {
+        if (manifestRulePaths.has(entry.path)) continue;
+        manifestRulePaths.add(entry.path);
+        const cat = (entry.path as string).startsWith('.claude/') ? 'claude-rule'
+          : (entry.path as string).startsWith('.cursor/') ? 'cursor-rule'
+          : 'agents';
+        const abs = path.join(root, entry.path);
+        files.push({ path: entry.path, annotation: '● active', updatedAt: fileMtime(abs), category: cat as ManagedFile['category'], scope: 'workspace', owner: 'aspectcode' });
+      }
+    } catch { /* malformed manifest */ }
+  }
+
+  // ── Workspace-scope: user-created scoped rules ──────────────
+  if (platform === 'claude' || platform === 'cursor') {
+    const rulesDir = platform === 'claude' ? '.claude/rules' : '.cursor/rules';
+    const ext = platform === 'claude' ? '.md' : '.mdc';
+    const absDir = path.join(root, rulesDir);
+    try {
+      if (fs.existsSync(absDir)) {
+        for (const entry of fs.readdirSync(absDir)) {
+          if (!entry.endsWith(ext)) continue;
+          if (entry.startsWith('ac-')) continue; // aspectcode-managed
+          const relPath = `${rulesDir}/${entry}`;
+          if (manifestRulePaths.has(relPath)) continue; // already tracked
+          files.push({ path: relPath, annotation: '○ user', updatedAt: fileMtime(path.join(absDir, entry)), category: 'user-rule', scope: 'workspace', owner: 'user' });
+        }
+      }
+    } catch { /* unreadable dir */ }
+  }
+
+  // ── Workspace-scope: settings ───────────────────────────────
+  if (platform === 'claude') {
+    const settingsLocal = path.join(root, '.claude', 'settings.local.json');
+    if (fs.existsSync(settingsLocal)) {
+      files.push({ path: '.claude/settings.local.json', annotation: '○ user', updatedAt: fileMtime(settingsLocal), category: 'workspace-config', scope: 'workspace', owner: 'user' });
+    }
+  }
+
+  // ── Workspace-scope: .aspectcode files ──────────────────────
+  if (preferenceCount > 0) {
+    files.push({ path: '.aspectcode/preferences.json', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+  }
+  const dreamStatePath = path.join(root, '.aspectcode', 'dream-state.json');
+  if (fs.existsSync(dreamStatePath)) {
+    try {
+      const ds = JSON.parse(fs.readFileSync(dreamStatePath, 'utf-8'));
+      const lastDream = ds.lastDreamAt ? new Date(ds.lastDreamAt).getTime() : 0;
+      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: lastDream, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+    } catch {
+      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: 0, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+    }
+  }
+
+  // ── Device-scope: ~/.claude/ memory (Claude Code only) ──────
+  if (platform === 'claude') {
+    const home = require('os').homedir();
+
+    // Device-root CLAUDE.md
+    const deviceClaudeMd = path.join(home, '.claude', 'CLAUDE.md');
+    if (fs.existsSync(deviceClaudeMd)) {
+      files.push({ path: '~/.claude/CLAUDE.md', annotation: '○ device', updatedAt: fileMtime(deviceClaudeMd), category: 'device', scope: 'device', owner: 'device' });
+    }
+
+    // Project-level CLAUDE.md (~/.claude/projects/<hash>/CLAUDE.md)
+    const projectClaudeMd = findDeviceProjectClaudeMd(home, root);
+    if (projectClaudeMd) {
+      files.push({ path: '~/.claude/projects/.../CLAUDE.md', annotation: '○ device', updatedAt: fileMtime(projectClaudeMd), category: 'device', scope: 'device', owner: 'device' });
+    }
+  }
+
+  return files;
+}
+
+/** Find the project-level CLAUDE.md in ~/.claude/projects/<hash>/ for the given workspace. */
+function findDeviceProjectClaudeMd(home: string, root: string): string | undefined {
+  const projectsBase = path.join(home, '.claude', 'projects');
+  if (!fs.existsSync(projectsBase)) return undefined;
+
+  const normalised = root.replace(/\\/g, '/');
+  const crypto = require('crypto');
+
+  // Try common hash strategies
+  const candidates = [
+    crypto.createHash('md5').update(normalised).digest('hex'),
+    crypto.createHash('sha256').update(normalised).digest('hex').slice(0, 32),
+    Buffer.from(normalised).toString('base64url'),
+    normalised.replace(/\//g, '-').replace(/^-/, ''),
+  ];
+
+  for (const candidate of candidates) {
+    const claudeMd = path.join(projectsBase, candidate, 'CLAUDE.md');
+    if (fs.existsSync(claudeMd)) return claudeMd;
+  }
+
+  // Fallback: scan project directories for CLAUDE.md
+  try {
+    for (const dir of fs.readdirSync(projectsBase)) {
+      const claudeMd = path.join(projectsBase, dir, 'CLAUDE.md');
+      if (fs.existsSync(claudeMd)) {
+        // Verify this directory is for our workspace by checking a jsonl file
+        const fullDir = path.join(projectsBase, dir);
+        const jsonls = fs.readdirSync(fullDir).filter((f: string) => f.endsWith('.jsonl'));
+        if (jsonls.length > 0) {
+          try {
+            const fd = fs.openSync(path.join(fullDir, jsonls[0]), 'r');
+            const buf = Buffer.alloc(2048);
+            const bytesRead = fs.readSync(fd, buf, 0, 2048, 0);
+            fs.closeSync(fd);
+            const sample = buf.slice(0, bytesRead).toString('utf-8');
+            if (sample.includes(normalised) || sample.includes(root.replace(/\\/g, '\\\\'))) {
+              return claudeMd;
+            }
+          } catch { /* skip */ }
+        }
+      }
+    }
+  } catch { /* scan failed */ }
+
+  return undefined;
 }
 
 // ── File watcher ─────────────────────────────────────────────
@@ -93,6 +266,7 @@ async function runOnce(
   ownership: OwnershipMode,
   probeAndRefine = false,
   preferences?: PreferencesStore,
+  activePlatform?: string,
 ): Promise<RunOnceResult> {
   const { root, flags, log } = ctx;
   const config = loadConfig(root);
@@ -201,6 +375,20 @@ async function runOnce(
     fileContents: workspace.relativeFiles,
   });
 
+  // ── 8. Write scoped rules for active platform ──────────────
+  if (!flags.dryRun) {
+    const platform = activePlatform === 'claude' ? 'claudeCode' as const : 'cursor' as const;
+    const scopedRules = extractScopedRules(model);
+    const written = await writeScopedRules(host, root, scopedRules, platform);
+    if (written.length > 0) {
+      store.addOutput(`${written.length} scoped rule${written.length === 1 ? '' : 's'}`);
+    }
+  }
+
+  // ── 9. Populate memory map ─────────────────────────────────
+  const prefs = loadPreferences(root);
+  store.setManagedFiles(buildManagedFiles(root, prefs.preferences.length, (activePlatform as 'claude' | 'cursor') || ''));
+
   const elapsedMs = Date.now() - startMs;
   store.setElapsed(`${(elapsedMs / 1000).toFixed(1)}s`);
   store.setPhase('done');
@@ -239,15 +427,16 @@ export async function resolveRunMode(root: string): Promise<RunMode> {
 // ── Assessment action handler ────────────────────────────────
 
 export interface AssessmentAction {
-  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine';
+  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine' | 'dream';
   assessment?: ChangeAssessment;
 }
 
-function handleAssessmentAction(
+async function handleAssessmentAction(
   action: AssessmentAction,
   prefs: PreferencesStore,
   root: string,
-): PreferencesStore {
+  ownership: OwnershipMode,
+): Promise<PreferencesStore> {
   if (!action.assessment) return prefs;
   const a = action.assessment;
   const dir = path.dirname(a.file) + '/';
@@ -260,11 +449,13 @@ function handleAssessmentAction(
       disposition: 'allow',
       directory: dir,
       details: a.details,
+      dependencyContext: a.dependencyContext,
     });
     savePreferences(root, prefs);
     store.setPreferenceCount(prefs.preferences.length);
-    store.setLearnedMessage(`Learned: ${a.rule} ok in ${dir}`);
+    store.setLearnedMessage(`Suppressed: ${a.rule} in ${dir}`);
     store.resolveAssessment('dismiss');
+    addCorrection('dismiss', a);
   } else if (action.type === 'confirm') {
     // Confirm → file-scoped deny (specific: "this matters for this file")
     prefs = addPreference(prefs, {
@@ -275,16 +466,29 @@ function handleAssessmentAction(
       directory: dir,
       details: a.details,
       suggestion: a.suggestion,
+      dependencyContext: a.dependencyContext,
     });
     savePreferences(root, prefs);
     store.setPreferenceCount(prefs.preferences.length);
-    store.setLearnedMessage(`Confirmed: ${a.rule} matters for ${a.file}`);
+    store.setLearnedMessage(`Enforced: ${a.rule} for ${a.file}`);
     store.setRecommendProbe(true);
     store.resolveAssessment('confirm');
+    addCorrection('confirm', a);
+
+    // Append immediate learned rule to AGENTS.md
+    const rule = deriveLearnedRule(a);
+    const state = getRuntimeState();
+    if (state.agentsContent) {
+      const updated = appendLearnedRule(state.agentsContent, rule);
+      updateRuntimeState({ agentsContent: updated });
+      const host = createNodeEmitterHost();
+      await writeAgentsMd(host, root, updated, ownership);
+    }
   } else if (action.type === 'skip') {
     store.advanceAssessment();
   }
 
+  store.setCorrectionCount(getUnprocessedCount());
   return prefs;
 }
 
@@ -295,9 +499,14 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
+  store.setRootPath(root);
+
+  // ── Resolve platform (Claude Code default, --cursor overrides) ──
+  const activePlatform = flags.cursor ? 'cursor' : 'claude';
+  store.setPlatform(activePlatform);
 
   // ── Initial run (with probe and refine) ────────────────────
-  const result = await runOnce(ctx, ownership, true);
+  const result = await runOnce(ctx, ownership, true, undefined, activePlatform);
   ctx.generate = true;
   if (result.code !== ExitCode.OK) return result.code;
 
@@ -315,17 +524,86 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   let pipelineRunning = false;
   let stopped = false;
   let pendingEvalEvents: FileChangeEvent[] = [];
+  let dreamTimer: NodeJS.Timeout | undefined;
+  let dreamPromptShown = false;
+
+  const optLog = flags.quiet ? undefined : {
+    info(msg: string)  { log.info(msg); },
+    warn(msg: string)  { log.warn(msg); },
+    error(msg: string) { log.error(msg); },
+    debug(msg: string) { log.debug(msg); },
+  };
+
+  // ── Dream cycle (d key or auto after 2 min) ────────────────
+
+  const doDreamCycle = async (): Promise<void> => {
+    if (pipelineRunning) return;
+    if (dreamTimer) { clearTimeout(dreamTimer); dreamTimer = undefined; }
+    dreamPromptShown = false;
+    store.setDreamPrompt(false);
+
+    const state = getRuntimeState();
+    if (!state.agentsContent) return;
+
+    let provider;
+    try {
+      const env = loadEnvFile(root);
+      provider = resolveProvider(env);
+    } catch { return; }
+
+    store.setDreaming(true);
+    pipelineRunning = true;
+    try {
+      const result = await runDreamCycle({
+        currentAgentsMd: state.agentsContent,
+        corrections: getCorrections(),
+        provider,
+        log: optLog,
+      });
+      const host = createNodeEmitterHost();
+      await writeAgentsMd(host, root, result.updatedAgentsMd, ownership);
+      updateRuntimeState({ agentsContent: result.updatedAgentsMd });
+      // Write any scoped rules from the dream cycle
+      if (result.scopedRules.length > 0 && activePlatform) {
+        const plat = activePlatform === 'claude' ? 'claudeCode' as const : 'cursor' as const;
+        await writeScopedRules(host, root, result.scopedRules, plat);
+      }
+      markProcessed();
+      store.setCorrectionCount(getUnprocessedCount());
+      saveDreamState(root, { lastDreamAt: new Date().toISOString() });
+      store.setLearnedMessage(`Refined: ${result.changes.join(', ')}`);
+      // Refresh memory map to reflect any new files
+      store.setManagedFiles(buildManagedFiles(root, loadPreferences(root).preferences.length, activePlatform as 'claude' | 'cursor'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`Dream cycle failed: ${msg}`);
+    } finally {
+      pipelineRunning = false;
+      store.setDreaming(false);
+    }
+  };
+
+  const checkDreamThreshold = (): void => {
+    if (shouldDream() && !dreamPromptShown) {
+      store.setDreamPrompt(true);
+      dreamPromptShown = true;
+      dreamTimer = setTimeout(() => void doDreamCycle(), 2 * 60 * 1000);
+    }
+  };
 
   // ── Probe and refine (manual via 'r' key) ──────────────────
 
   const doProbeAndRefine = async (): Promise<void> => {
     if (stopped || pipelineRunning) return;
+    // Run pending dream cycle before full probe-and-refine
+    if (shouldDream()) await doDreamCycle();
+    if (pipelineRunning) return; // doDreamCycle may have set this
     pipelineRunning = true;
     if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
     pendingEvalEvents.length = 0;
     store.setRecommendProbe(false);
     try {
-      await runOnce(ctx, ownership, true, prefs);
+      await runOnce(ctx, ownership, true, prefs, activePlatform);
       prefs = loadPreferences(root);
       store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
@@ -415,7 +693,14 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       void doProbeAndRefine();
       return;
     }
-    prefs = handleAssessmentAction(action, prefs, root);
+    if (action.type === 'dream') {
+      void doDreamCycle();
+      return;
+    }
+    void handleAssessmentAction(action, prefs, root, ownership).then((updated) => {
+      prefs = updated;
+      checkDreamThreshold();
+    });
   };
 
   (store as any)._onAssessmentAction = onAssessmentAction;
@@ -425,6 +710,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       if (stopped) return;
       stopped = true;
       if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
+      if (dreamTimer) { clearTimeout(dreamTimer); dreamTimer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));
       await watcher.close();

@@ -1,21 +1,23 @@
 /**
- * Dashboard — ink-based CLI dashboard with real-time change assessments.
+ * Dashboard — ink-based CLI dashboard with memory map and real-time assessments.
  *
- * v2 layout:
- *   Banner → Setup → Status → Eval progress → Summary →
- *   Assessment display → Status line (persistent)
+ * Layout:
+ *   Header → Memory Map → (Working status | Eval progress) →
+ *   Assessment area → Status bar
  */
 
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Key } from 'ink';
-import { COLORS, getBannerText } from './theme';
+import { COLORS } from './theme';
 import { store } from './store';
 import type { DashboardState, PipelinePhase, EvalPhase } from './store';
+import MemoryMap from './MemoryMap';
 
 // ── Spinner ──────────────────────────────────────────────────
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const DREAM_FRAMES = ['✦', '◆', '✦', '◇'];
 
 function useSpinner(active: boolean): string {
   const [frame, setFrame] = useState(0);
@@ -27,51 +29,62 @@ function useSpinner(active: boolean): string {
   return FRAMES[frame];
 }
 
-// ── Live elapsed timer ───────────────────────────────────────
-
-function useElapsedTimer(startMs: number, finalElapsed: string, isWorking: boolean): string {
-  const [now, setNow] = useState(Date.now());
+function useDreamSpinner(active: boolean): string {
+  const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!isWorking || startMs === 0) return;
-    const id = setInterval(() => setNow(Date.now()), 100);
+    if (!active) return;
+    const id = setInterval(() => setFrame((f) => (f + 1) % DREAM_FRAMES.length), 400);
     return () => clearInterval(id);
-  }, [isWorking, startMs]);
-
-  if (finalElapsed) return finalElapsed;
-  if (startMs === 0 || !isWorking) return '';
-  return `${((now - startMs) / 1000).toFixed(1)}s`;
+  }, [active]);
+  return DREAM_FRAMES[frame];
 }
 
-// ── Auto-clear learned message ───────────────────────────────
+// ── Auto-dismiss eval status when cancelled ──────────────────
 
-function useLearnedMessage(msg: string): string {
+function useAutoDismissEval(evalDone: boolean, cancelled: boolean): void {
+  useEffect(() => {
+    if (!evalDone || !cancelled) return;
+    const id = setTimeout(() => store.dismissEvalStatus(), 5000);
+    return () => clearTimeout(id);
+  }, [evalDone, cancelled]);
+}
+
+// ── Auto-clear hooks ─────────────────────────────────────────
+
+function useAutoMessage(msg: string, clearFn: () => void, durationMs = 4000): string {
   const [visible, setVisible] = useState(msg);
   useEffect(() => {
     if (!msg) { setVisible(''); return; }
     setVisible(msg);
-    const id = setTimeout(() => {
-      setVisible('');
-      store.setLearnedMessage('');
-    }, 4000);
+    const id = setTimeout(() => { setVisible(''); clearFn(); }, durationMs);
     return () => clearTimeout(id);
   }, [msg]);
   return visible;
 }
 
-// ── Auto-clear change flash ───────────────────────────────
+// ── Slow pulse for watching indicator ─────────────────────────
 
-function useChangeFlash(msg: string): string {
-  const [visible, setVisible] = useState(msg);
+const PULSE_FRAMES = ['●', '●', '○', '○'];
+
+function usePulse(active: boolean): string {
+  const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!msg) { setVisible(''); return; }
-    setVisible(msg);
-    const id = setTimeout(() => {
-      setVisible('');
-      store.setLastChangeFlash('');
-    }, 4000);
-    return () => clearTimeout(id);
-  }, [msg]);
-  return visible;
+    if (!active) return;
+    const id = setInterval(() => setFrame((f) => (f + 1) % PULSE_FRAMES.length), 1500);
+    return () => clearInterval(id);
+  }, [active]);
+  return PULSE_FRAMES[frame];
+}
+
+// ── Tick for relative timestamps ─────────────────────────────
+
+function useTick(intervalMs: number): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return tick;
 }
 
 // ── Phase labels ─────────────────────────────────────────────
@@ -93,19 +106,8 @@ const WORKING = new Set<PipelinePhase>([
   'idle', 'discovering', 'analyzing', 'building-kb', 'optimizing', 'evaluating', 'writing',
 ]);
 
-// ── Helpers ──────────────────────────────────────────────────
+// ── Eval progress text ───────────────────────────────────────
 
-function statsText(s: DashboardState, liveElapsed: string): string {
-  const parts: string[] = [];
-  if (s.fileCount > 0) parts.push(`${s.fileCount} files`);
-  if (s.edgeCount > 0) parts.push(`${s.edgeCount} edges`);
-  if (s.provider)       parts.push(s.provider);
-  const elapsed = liveElapsed || s.elapsed;
-  if (elapsed)          parts.push(elapsed);
-  return parts.length > 0 ? parts.join(' · ') : '';
-}
-
-/** Primary eval progress line — shown with spinner during active refinement. */
 function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | null {
   const round = s.iteration && s.maxIterations
     ? `Round ${s.iteration}/${s.maxIterations}: `
@@ -118,52 +120,45 @@ function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | n
       const progress = s.probesPassed !== undefined && s.probesTotal !== undefined
         ? ` (${s.probesPassed}/${s.probesTotal})`
         : '';
-      const task = s.currentProbeTask ? ` — ${s.currentProbeTask}` : '';
-      return `${round}Testing guidelines${progress}…${task}`;
+      return `${round}Testing guidelines${progress}…`;
     }
     case 'judging': {
       const progress = s.judgedCount !== undefined && s.probesTotal !== undefined
         ? ` (${s.judgedCount}/${s.probesTotal})`
         : '';
-      const task = s.currentProbeTask ? ` — ${s.currentProbeTask}` : '';
-      return `${round}Reviewing results${progress}…${task}`;
+      return `${round}Reviewing results${progress}…`;
     }
     case 'diagnosing': {
       const detail = s.weakCount !== undefined && s.strongCount !== undefined
-        ? ` — ${s.strongCount} passed, ${s.weakCount} gap${s.weakCount === 1 ? '' : 's'} found`
+        ? ` — ${s.strongCount} passed, ${s.weakCount} gap${s.weakCount === 1 ? '' : 's'}`
         : '';
       return `${round}Identifying improvements${detail}…`;
     }
     case 'applying': {
       const count = s.proposedEditCount ? ` ${s.proposedEditCount}` : '';
-      return `${round}Applying${count} improvement${s.proposedEditCount === 1 ? '' : 's'} to AGENTS.md…`;
+      return `${round}Applying${count} improvement${s.proposedEditCount === 1 ? '' : 's'}…`;
     }
     case 'done': {
       const edits = s.diagnosisEdits ?? 0;
       const rounds = s.iterationSummaries?.length ?? 0;
       const roundNote = rounds > 1 ? ` across ${rounds} rounds` : '';
-      let label: string;
       if (s.cancelled) {
-        label = edits > 0
-          ? `Refinement cancelled — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
-          : 'Refinement cancelled — no changes applied';
-      } else {
-        label = edits > 0
-          ? `Refinement complete — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
-          : 'Refinement complete — no changes needed';
+        return edits > 0
+          ? `Cancelled — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
+          : 'Cancelled — no changes applied';
       }
-      return `${label}  [c] clear`;
+      return edits > 0
+        ? `Complete — ${edits} improvement${edits === 1 ? '' : 's'} applied${roundNote}`
+        : 'Complete — no changes needed';
     }
   }
 }
 
-function fmtTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
+// ── Separator line ───────────────────────────────────────────
+
+const SEP_CHAR = '┄';
 
 // ── Component ────────────────────────────────────────────────
-
-const FIRST_RUN_VISIBLE = new Set<PipelinePhase>(['idle', 'discovering', 'analyzing']);
 
 const Dashboard: React.FC = () => {
   const [s, setS] = useState<DashboardState>({ ...store.state });
@@ -173,9 +168,11 @@ const Dashboard: React.FC = () => {
     return () => { store.removeListener('change', fn); };
   }, []);
 
+  // Force re-render every 10s so relative timestamps update
+  useTick(10_000);
+
   // ── Keyboard handling ──────────────────────────────────────
   useInput((input: string, _key: Key) => {
-    // Global keys (no handler needed)
     if (input === 'x') {
       const evalPhase = store.state.evalStatus.phase;
       if (evalPhase !== 'idle' && evalPhase !== 'done') {
@@ -194,18 +191,20 @@ const Dashboard: React.FC = () => {
 
     const current = store.state.currentAssessment;
 
-    if (input === 'r') {
-      handler({ type: 'probe-and-refine' });
+    if (input === 'r') { handler({ type: 'probe-and-refine' }); return; }
+    if (input === 'd') {
+      if (store.state.correctionCount === 0) {
+        store.setLearnedMessage('no corrections to dream on yet');
+      } else {
+        handler({ type: 'dream' });
+      }
       return;
     }
 
-    // Assessment keys (only when an assessment is shown)
     if (!current) return;
-
     if (input === 'n') {
       handler({ type: 'dismiss', assessment: current });
     } else if (input === 'y') {
-      // Print suggestion prominently
       if (current.suggestion) {
         process.stderr.write(`\n  Suggestion:\n  ${current.suggestion}\n\n`);
       }
@@ -215,199 +214,149 @@ const Dashboard: React.FC = () => {
     }
   });
 
-  const compact = s.compact;
   const working = WORKING.has(s.phase);
-  const spinner = useSpinner(working);
-  const liveElapsed = useElapsedTimer(s.runStartMs, s.elapsed, working);
-  const stats = statsText(s, liveElapsed);
+  const isWatching = s.phase === 'watching';
+  const spinner = useSpinner(working || s.dreaming);
+  const dreamSpinner = useDreamSpinner(s.dreaming);
+  const pulse = usePulse(isWatching);
   const detail = s.phaseDetail ? ` (${s.phaseDetail})` : '';
-  const setup = s.setupNotes.length > 0 ? s.setupNotes.join(' · ') : '';
   const evalLabel = evalText(s.evalStatus.phase, s.evalStatus);
   const evalDone = s.evalStatus.phase === 'done';
   const evalActive = s.evalStatus.phase !== 'idle';
-  const isDone = s.phase === 'done' || s.phase === 'watching';
-  const learnedMsg = useLearnedMessage(s.learnedMessage);
-
-  const changeFlash = useChangeFlash(s.lastChangeFlash);
+  const learnedMsg = useAutoMessage(s.learnedMessage, () => store.setLearnedMessage(''));
+  const changeFlash = useAutoMessage(s.lastChangeFlash, () => store.setLastChangeFlash(''));
   const current = s.currentAssessment;
   const queueLen = s.pendingAssessments.length;
 
+  // Auto-dismiss cancelled eval status after 5s
+  useAutoDismissEval(evalDone, s.evalStatus.cancelled ?? false);
+
+  // ── Build header info ──────────────────────────────────────
+  const rootLabel = s.rootPath ? s.rootPath.replace(/\\/g, '/').split('/').pop() || s.rootPath : '';
+
   return (
     <Box flexDirection="column">
-      {/* ── Banner ──────────────────────────────── */}
-      {!compact && (
-        <Box marginBottom={0}>
-          <Text color={COLORS.primary} bold>{getBannerText()}</Text>
-        </Box>
+
+      {/* ── Header ──────────────────────────────── */}
+      <Text>
+        <Text color={COLORS.primary} bold>{'◆ aspect code'}</Text>
+        {rootLabel ? <Text color={COLORS.gray}>{` ${SEP_CHAR} ${rootLabel}`}</Text> : null}
+        {s.activePlatform ? <Text color={COLORS.gray}>{` ${SEP_CHAR} ${s.activePlatform}`}</Text> : null}
+      </Text>
+
+      {/* ── Working status (during pipeline) ──────── */}
+      {working && s.phase !== 'evaluating' && (
+        <Text color={COLORS.primary}>{`${spinner} ${PHASE_TEXT[s.phase]}${detail}`}</Text>
       )}
 
-      {/* ── First-run ────────────────────────────── */}
-      {s.isFirstRun && FIRST_RUN_VISIBLE.has(s.phase) && (
-        <Box marginBottom={0}>
-          <Text color={COLORS.gray}>
-            {'  Analyzing your codebase to generate AGENTS.md — the coding\n  guidelines AI assistants follow in this project.'}
-          </Text>
-        </Box>
+      {/* ── First-run hint ────────────────────────── */}
+      {s.isFirstRun && working && (
+        <Text color={COLORS.gray}>{'Analyzing your codebase to generate AGENTS.md'}</Text>
       )}
 
-      {/* ── Setup notes ──────────────────────────── */}
-      {setup !== '' && !(compact && !s.warning) && (
-        <Box marginTop={1}>
-          <Text color={COLORS.gray}>{`  ${setup}`}</Text>
+      {/* ── Memory map (always visible once populated) ── */}
+      {s.managedFiles.length > 0 && (
+        <Box marginTop={0}>
+          <MemoryMap files={s.managedFiles} dreaming={s.dreaming} />
         </Box>
       )}
-
-      {/* ── Status line ──────────────────────────── */}
-      <Box>
-        {working && s.phase !== 'evaluating' && (
-          <Text color={COLORS.primary}>{`  ${spinner} ${PHASE_TEXT[s.phase]}${detail}`}</Text>
-        )}
-        {s.phase === 'watching' && !current && (
-          <Text color={COLORS.primary} bold>{'  ● Watching for changes'}</Text>
-        )}
-        {s.phase === 'done' && s.outputs.length > 0 && (
-          <Text color={COLORS.primary}>{`  ● ${s.outputs.join(', ')}`}</Text>
-        )}
-        {s.phase === 'done' && s.outputs.length === 0 && (
-          <Text color={COLORS.primary}>{'  ● Done'}</Text>
-        )}
-        {s.phase === 'error' && (
-          <Text color={COLORS.yellow}>{'  ● Error'}</Text>
-        )}
-        {stats !== '' && !working && isDone && (
-          <Text color={COLORS.gray}>{`  ${stats}`}</Text>
-        )}
-      </Box>
 
       {/* ── Evaluator progress ────────────────────── */}
       {evalActive && evalLabel && !s.evalStatus.dismissed && (
         <Box flexDirection="column">
-          {/* Primary eval line (with spinner when active, cancel hint) */}
           <Text color={evalDone ? COLORS.primary : COLORS.primaryDim}>
-            {evalDone ? `  ${evalLabel}` : `  ${spinner} ${evalLabel}`}
+            {evalDone ? evalLabel : `${spinner} ${evalLabel}`}
             {!evalDone && !s.evalStatus.cancelled ? '  [x] cancel' : ''}
+            {evalDone ? '  [c] clear' : ''}
           </Text>
-
-          {/* Iteration summaries (accumulated, shown during and after loop) */}
           {s.evalStatus.iterationSummaries && s.evalStatus.iterationSummaries.map((summary, i) => (
-            <Text key={`iter-${i}`} color={COLORS.gray}>{`  ├ ${summary}`}</Text>
+            <Text key={`iter-${i}`} color={COLORS.gray}>{`├ ${summary}`}</Text>
           ))}
-
-          {/* Edit summaries (shown when done) */}
           {evalDone && s.evalStatus.editSummaries && s.evalStatus.editSummaries.length > 0 && (
             <>
               {s.evalStatus.editSummaries.slice(0, 5).map((line, i, arr) => {
                 const isLast = i === arr.length - 1 && (s.evalStatus.editSummaries?.length ?? 0) <= 5;
-                return (
-                  <Text key={`edit-${i}`} color={COLORS.gray}>{`  ${isLast ? '└' : '├'} ${line}`}</Text>
-                );
+                return <Text key={`edit-${i}`} color={COLORS.gray}>{`${isLast ? '└' : '├'} ${line}`}</Text>;
               })}
               {s.evalStatus.editSummaries.length > 5 && (
-                <Text color={COLORS.gray}>{`  └ +${s.evalStatus.editSummaries.length - 5} more`}</Text>
+                <Text color={COLORS.gray}>{`└ +${s.evalStatus.editSummaries.length - 5} more`}</Text>
               )}
             </>
           )}
         </Box>
       )}
 
-      {/* ── Token usage ──────────────────────────── */}
-      {s.tokenUsage && isDone && !current && (
-        <Text color={COLORS.gray}>
-          {`  ${fmtTokens(s.tokenUsage.inputTokens)} in · ${fmtTokens(s.tokenUsage.outputTokens)} out`}
-        </Text>
-      )}
-
-      {/* ── Diff summary ─────────────────────────── */}
-      {s.diffSummary && s.diffSummary.changed && isDone && !current && (
-        <Text color={COLORS.gray}>
-          {`  ↳ AGENTS.md: ` +
-            (s.diffSummary.added > 0 ? `+${s.diffSummary.added} lines` : '') +
-            (s.diffSummary.added > 0 && s.diffSummary.removed > 0 ? ', ' : '') +
-            (s.diffSummary.removed > 0 ? `-${s.diffSummary.removed} lines` : '')}
-        </Text>
-      )}
-
       {/* ── Warning ──────────────────────────────── */}
       {s.warning !== '' && (
-        <Box marginTop={0}>
-          <Text color={COLORS.yellow}>{`  ● ${s.warning}`}</Text>
+        <Text color={COLORS.yellow}>{`● ${s.warning}`}</Text>
+      )}
+
+      {/* ── Watching indicator ─────────────────────── */}
+      {isWatching && (
+        <Text color={COLORS.gray}>{`${pulse} watching`}</Text>
+      )}
+
+      {/* ── Dream cycle in progress ───────────────── */}
+      {s.dreaming && (
+        <Text color={COLORS.primary}>{`${dreamSpinner} dreaming — refining from ${s.correctionCount} correction${s.correctionCount === 1 ? '' : 's'}…`}</Text>
+      )}
+
+      {/* ── Assessment area ───────────────────────── */}
+      {!s.dreaming && current && (current.type === 'warning' || current.type === 'violation') && (
+        <Box flexDirection="column">
+          <Box>
+            <Text color={current.type === 'violation' ? COLORS.red : COLORS.yellow}>
+              {current.type === 'violation' ? '✗ ' : '⚠ '}
+            </Text>
+            <Text color={COLORS.white} bold>{current.file}</Text>
+          </Box>
+          <Text color={COLORS.gray}>{`  ${current.rule} · ${current.message}`}</Text>
+          {current.details ? (
+            <Text color={COLORS.gray}>{`  ${current.details}`}</Text>
+          ) : null}
+          <Box>
+            <Text color={COLORS.gray}>{'  [y] confirm  [n] dismiss  [s] skip'}</Text>
+            {queueLen > 0 && (
+              <Text color={COLORS.gray}>{`       (1 of ${queueLen + 1})`}</Text>
+            )}
+          </Box>
         </Box>
       )}
 
-      {/* ══ v2: Current assessment ═══════════════════ */}
-      {current && current.type === 'warning' && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color={COLORS.yellow} bold>
-            {`  ● ${current.file}`}
-            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
-          </Text>
-          <Text color={COLORS.yellow}>{`    ${current.message}`}</Text>
-          {current.details && (
-            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
-          )}
-          {current.suggestion && (
-            <Text color={COLORS.gray}>{`    → ${current.suggestion}`}</Text>
-          )}
-          <Text color={COLORS.gray}>
-            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
-          </Text>
-        </Box>
-      )}
-
-      {current && current.type === 'violation' && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color={COLORS.yellow} bold>
-            {`  ● ${current.file}`}
-            {queueLen > 0 ? ` (1 of ${queueLen + 1})` : ''}
-          </Text>
-          <Text color={COLORS.yellow}>{`    ${current.message}`}</Text>
-          {current.details && (
-            <Text color={COLORS.gray}>{`    ${current.details}`}</Text>
-          )}
-          {current.suggestion && (
-            <Text color={COLORS.gray}>{`    → ${current.suggestion}`}</Text>
-          )}
-          <Text color={COLORS.gray}>
-            {'    [y] confirm  [n] dismiss (learn)  [s] skip'}
-          </Text>
-        </Box>
+      {/* ── OK flash (auto-clears) ────────────────── */}
+      {!s.dreaming && !current && changeFlash !== '' && isWatching && (
+        <Text color={COLORS.gray}>{`✓ ${changeFlash}`}</Text>
       )}
 
       {/* ── Learned message (auto-clears) ─────────── */}
       {learnedMsg !== '' && (
-        <Text color={COLORS.primary}>{`  ● ${learnedMsg}`}</Text>
+        <Text color={COLORS.primary}>{`● ${learnedMsg}`}</Text>
       )}
 
-      {/* ══ v2: Persistent status line ════════════════ */}
-      {isDone && s.phase === 'watching' && (
-        <Box flexDirection="column" marginTop={1}>
-          {/* Change flash or recommend nudge (fixed slot, doesn't shift status line) */}
-          {changeFlash !== '' && !current ? (
-            <Text color={COLORS.primary}>{`  ● ${changeFlash}`}</Text>
-          ) : s.recommendProbe && !current ? (
-            <Text color={COLORS.primary}>
-              {`  ↻ ${s.addCount + s.changeCount} file changes since last run`}
-            </Text>
-          ) : (
-            <Text>{' '}</Text>
-          )}
-          <Box>
-            <Text color={COLORS.white}>
-              {(() => {
-                const pending = queueLen + (current ? 1 : 0);
-                const fileParts: string[] = [];
-                if (s.addCount > 0) fileParts.push(`${s.addCount} new`);
-                if (s.changeCount > 0) fileParts.push(`${s.changeCount} modified`);
-                const fileLabel = fileParts.length > 0 ? fileParts.join(' · ') : '0 changes';
-                return `  ${fileLabel}` +
-                  (pending > 0 ? ` · ${pending} pending` : '') +
-                  (s.preferenceCount > 0 ? ` · ${s.preferenceCount} preferences saved` : '') +
-                  `  `;
-              })()}
-            </Text>
-            <Text color={COLORS.primaryDim}>{'[r] probe & refine'}</Text>
-          </Box>
-        </Box>
+      {/* ── Dream prompt ──────────────────────────── */}
+      {s.dreamPrompt && !s.dreaming && isWatching && (
+        <Text color={COLORS.yellow}>{`✦ ${s.correctionCount} corrections — press d to refine`}</Text>
+      )}
+
+      {/* ── Status bar ────────────────────────────── */}
+      {isWatching && (
+        <Text color={COLORS.gray} dimColor>
+          {(() => {
+            const stats = s.assessmentStats;
+            const parts: string[] = [];
+            parts.push(`${stats.changes} changes`);
+            if (stats.warnings > 0) parts.push(`${stats.warnings} warnings`);
+            if (s.correctionCount > 0) parts.push(`${s.correctionCount} corrections`);
+            return parts.join(' · ');
+          })()}
+        </Text>
+      )}
+      {isWatching && (
+        <Text>
+          <Text color={s.correctionCount > 0 ? COLORS.primaryDim : COLORS.gray} dimColor={s.correctionCount === 0}>{'[d] dream'}</Text>
+          <Text color={COLORS.primaryDim}>{'  [r] probe & refine'}</Text>
+          {s.recommendProbe ? <Text color={COLORS.primary}>{' ●'}</Text> : null}
+        </Text>
       )}
     </Box>
   );
