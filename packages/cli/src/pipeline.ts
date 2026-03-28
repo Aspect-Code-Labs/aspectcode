@@ -42,6 +42,7 @@ import {
   saveDreamState,
 } from './dreamCycle';
 import { extractScopedRules, writeScopedRules } from './scopedRules';
+import { loadCredentials, startBackgroundLogin } from './auth';
 import type { ManagedFile } from './ui/store';
 import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
 
@@ -386,7 +387,7 @@ async function runOnce(
   }
 
   // ── 9. Populate memory map ─────────────────────────────────
-  const prefs = loadPreferences(root);
+  const prefs = await loadPreferences(root);
   store.setManagedFiles(buildManagedFiles(root, prefs.preferences.length, (activePlatform as 'claude' | 'cursor') || ''));
 
   const elapsedMs = Date.now() - startMs;
@@ -427,7 +428,7 @@ export async function resolveRunMode(root: string): Promise<RunMode> {
 // ── Assessment action handler ────────────────────────────────
 
 export interface AssessmentAction {
-  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine' | 'dream';
+  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine' | 'dream' | 'login';
   assessment?: ChangeAssessment;
 }
 
@@ -505,6 +506,10 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   const activePlatform = flags.cursor ? 'cursor' : 'claude';
   store.setPlatform(activePlatform);
 
+  // ── Check login status ────────────────────────────────────
+  const creds = loadCredentials();
+  store.setUserEmail(creds?.email ?? '');
+
   // ── Initial run (with probe and refine) ────────────────────
   const result = await runOnce(ctx, ownership, true, undefined, activePlatform);
   ctx.generate = true;
@@ -513,7 +518,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   if (flags.once) return ExitCode.OK;
 
   // ── Load preferences ───────────────────────────────────────
-  let prefs = loadPreferences(root);
+  let prefs = await loadPreferences(root);
   store.setPreferenceCount(prefs.preferences.length);
 
   // ── Watch mode with real-time evaluation ───────────────────
@@ -573,7 +578,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       saveDreamState(root, { lastDreamAt: new Date().toISOString() });
       store.setLearnedMessage(`Refined: ${result.changes.join(', ')}`);
       // Refresh memory map to reflect any new files
-      store.setManagedFiles(buildManagedFiles(root, loadPreferences(root).preferences.length, activePlatform as 'claude' | 'cursor'));
+      store.setManagedFiles(buildManagedFiles(root, (await loadPreferences(root)).preferences.length, activePlatform as 'claude' | 'cursor'));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.warn(`Dream cycle failed: ${msg}`);
@@ -604,7 +609,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     store.setRecommendProbe(false);
     try {
       await runOnce(ctx, ownership, true, prefs, activePlatform);
-      prefs = loadPreferences(root);
+      prefs = await loadPreferences(root);
       store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
     } catch (err) {
@@ -695,6 +700,18 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     }
     if (action.type === 'dream') {
       void doDreamCycle();
+      return;
+    }
+    if (action.type === 'login') {
+      store.setLearnedMessage('opening browser…');
+      void startBackgroundLogin().then((email) => {
+        if (email) {
+          store.setUserEmail(email);
+          store.setLearnedMessage(`logged in as ${email}`);
+        } else {
+          store.setLearnedMessage('login failed or timed out');
+        }
+      });
       return;
     }
     void handleAssessmentAction(action, prefs, root, ownership).then((updated) => {

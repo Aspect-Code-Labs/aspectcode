@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { loadCredentials, WEB_APP_URL } from './auth';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ function prefsPath(root: string): string {
   return path.join(root, DIR_NAME, FILE_NAME);
 }
 
-export function loadPreferences(root: string): PreferencesStore {
+function loadPreferencesLocal(root: string): PreferencesStore {
   const p = prefsPath(root);
   if (!fs.existsSync(p)) {
     return { version: 1, preferences: [] };
@@ -77,12 +78,83 @@ export function loadPreferences(root: string): PreferencesStore {
   }
 }
 
-export function savePreferences(root: string, store: PreferencesStore): void {
+function savePreferencesLocal(root: string, store: PreferencesStore): void {
   const dir = path.join(root, DIR_NAME);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(prefsPath(root), JSON.stringify(store, null, 2) + '\n');
+}
+
+function projectName(root: string): string {
+  return path.basename(root);
+}
+
+// ── Remote sync (best-effort, never blocks) ─────────────────
+
+async function fetchPreferencesFromRemote(root: string): Promise<LearnedPreference[] | null> {
+  const creds = loadCredentials();
+  if (!creds) return null;
+
+  try {
+    const project = projectName(root);
+    const res = await fetch(
+      `${WEB_APP_URL}/api/cli/preferences?project=${encodeURIComponent(project)}`,
+      { headers: { Authorization: `Bearer ${creds.token}` } },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { preferences?: LearnedPreference[] };
+    return data.preferences ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function syncPreferencesToRemote(root: string, store: PreferencesStore): void {
+  const creds = loadCredentials();
+  if (!creds) return;
+
+  const project = projectName(root);
+
+  // Fire and forget — don't block the pipeline
+  fetch(`${WEB_APP_URL}/api/cli/preferences`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${creds.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ project, preferences: store.preferences }),
+  }).catch(() => {});
+}
+
+// ── Public load / save (local + remote) ─────────────────────
+
+export async function loadPreferences(root: string): Promise<PreferencesStore> {
+  const local = loadPreferencesLocal(root);
+
+  // Try to fetch remote preferences and merge (remote wins on conflict)
+  const remote = await fetchPreferencesFromRemote(root);
+  if (!remote || remote.length === 0) return local;
+
+  // Merge: build a map keyed by id, remote overwrites local
+  const merged = new Map<string, LearnedPreference>();
+  for (const p of local.preferences) merged.set(p.id, p);
+  for (const p of remote) merged.set(p.id, p);
+
+  const store: PreferencesStore = {
+    version: 1,
+    preferences: Array.from(merged.values()),
+  };
+
+  // Update local file with merged result
+  savePreferencesLocal(root, store);
+
+  return store;
+}
+
+export function savePreferences(root: string, store: PreferencesStore): void {
+  savePreferencesLocal(root, store);
+  syncPreferencesToRemote(root, store);
 }
 
 // ── Mutations ────────────────────────────────────────────────

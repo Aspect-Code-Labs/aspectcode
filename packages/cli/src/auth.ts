@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { fmt } from './logger';
 
-const WEB_APP_URL = process.env.ASPECTCODE_WEB_URL ?? 'https://aspectcode.com';
+export const WEB_APP_URL = process.env.ASPECTCODE_WEB_URL ?? 'https://aspectcode.com';
 const CREDENTIALS_DIR = path.join(
   process.env.HOME ?? process.env.USERPROFILE ?? '~',
   '.aspectcode',
