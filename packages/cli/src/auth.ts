@@ -196,10 +196,13 @@ export async function loginCommand(args: string[] = []): Promise<void> {
     });
 
     // Timeout after 2 minutes
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       server.close();
       reject(new Error('Login timed out. Please try again.'));
     }, 120_000);
+
+    // Ensure timeout doesn't keep the process alive after resolve/reject
+    timeout.unref();
   });
 
   // Verify state

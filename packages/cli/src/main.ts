@@ -126,7 +126,7 @@ function parseFloatFlag(value: unknown, min: number, max: number): number | unde
 // ── Main ─────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  // Handle subcommands that exit immediately
+  // Handle subcommands
   const firstArg = process.argv[2];
   if (firstArg === 'logout') { await logoutCommand(); return; }
   if (firstArg === 'whoami') { await whoamiCommand(); return; }
@@ -135,7 +135,8 @@ async function main(): Promise<void> {
   if (firstArg === 'login') {
     await loginCommand(process.argv.slice(3));
     if (process.exitCode) return; // login failed
-    // Fall through to run the normal pipeline
+    // Strip 'login' (and optional code arg) from argv before parsing flags
+    process.argv = [process.argv[0], process.argv[1]];
   }
 
   const flags = parseArgs(process.argv);
