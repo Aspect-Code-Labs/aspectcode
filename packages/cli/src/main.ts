@@ -1,7 +1,8 @@
 /**
  * aspectcode CLI — main entry point.
  *
- * No subcommands. `aspectcode [flags]` runs the pipeline:
+ * Subcommands: login, logout, whoami.
+ * Default (no subcommand): `aspectcode [flags]` runs the pipeline:
  *   analyze → build KB → ingest tool files → optimize → write AGENTS.md → watch
  */
 
@@ -15,6 +16,7 @@ import { runPipeline, resolveRunMode } from './pipeline';
 import { createDashboardLogger, createDashboardSpinner } from './ui/inkLogger';
 import { store } from './ui/store';
 import type { PipelinePhase } from './ui/store';
+import { loginCommand, logoutCommand, whoamiCommand } from './auth';
 
 // ── Build lookup tables from FLAG_DEFS ───────────────────────
 
@@ -89,16 +91,23 @@ ${fmt.bold('aspectcode')} — generate AGENTS.md for your codebase
 
 ${fmt.bold('USAGE')}
   aspectcode [options]
+  aspectcode <command>
 
   Analyzes your codebase, builds a knowledge base, reads existing AI tool
   instruction files for context, generates AGENTS.md via LLM (when API key
   is available), and watches for changes.
+
+${fmt.bold('COMMANDS')}
+  login                           ${fmt.dim('# Authenticate via browser (Google OAuth)')}
+  logout                          ${fmt.dim('# Clear stored credentials')}
+  whoami                          ${fmt.dim('# Show current logged-in user')}
 
 ${fmt.bold('OPTIONS')}
 ${optionLines.join('\n')}
 
 ${fmt.bold('EXAMPLES')}
   aspectcode                      ${fmt.dim('# watch & auto-update AGENTS.md')}
+  aspectcode login                ${fmt.dim('# authenticate with your account')}
   aspectcode --once               ${fmt.dim('# run once then exit')}
   aspectcode --once --dry-run     ${fmt.dim('# preview without writing')}
   aspectcode --provider openai    ${fmt.dim('# force specific LLM provider')}
@@ -117,6 +126,18 @@ function parseFloatFlag(value: unknown, min: number, max: number): number | unde
 // ── Main ─────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Handle subcommands that exit immediately
+  const firstArg = process.argv[2];
+  if (firstArg === 'logout') { await logoutCommand(); return; }
+  if (firstArg === 'whoami') { await whoamiCommand(); return; }
+
+  // Login then continue to pipeline
+  if (firstArg === 'login') {
+    await loginCommand(process.argv.slice(3));
+    if (process.exitCode) return; // login failed
+    // Fall through to run the normal pipeline
+  }
+
   const flags = parseArgs(process.argv);
 
   // Global flags that exit early
