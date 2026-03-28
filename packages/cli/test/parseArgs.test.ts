@@ -110,4 +110,16 @@ describe('parseArgs', () => {
     assert.equal(r.dryRun, true);
     assert.equal(r.verbose, true);
   });
+
+  it('parses --cursor flag', () => {
+    const r = parseArgs([...base, '--cursor']);
+    assert.equal(r.cursor, true);
+  });
+
+  it('ignores positional arguments (e.g. subcommands)', () => {
+    const r = parseArgs([...base, 'login']);
+    // 'login' is not a flag, should be ignored by parseArgs
+    assert.equal(r.help, false);
+    assert.equal(r.version, false);
+  });
 });
