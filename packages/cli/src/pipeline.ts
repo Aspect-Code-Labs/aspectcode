@@ -145,7 +145,7 @@ function buildManagedFiles(
 
   // ── Workspace-scope: .aspectcode files ──────────────────────
   if (preferenceCount > 0) {
-    files.push({ path: '.aspectcode/preferences.json', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+    files.push({ path: '☁ preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
   }
   const dreamStatePath = path.join(root, '.aspectcode', 'dream-state.json');
   if (fs.existsSync(dreamStatePath)) {

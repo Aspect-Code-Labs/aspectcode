@@ -16,7 +16,7 @@ import { runPipeline, resolveRunMode } from './pipeline';
 import { createDashboardLogger, createDashboardSpinner } from './ui/inkLogger';
 import { store } from './ui/store';
 import type { PipelinePhase } from './ui/store';
-import { loginCommand, logoutCommand, whoamiCommand } from './auth';
+import { loginCommand, logoutCommand, whoamiCommand, loadCredentials } from './auth';
 
 // ── Build lookup tables from FLAG_DEFS ───────────────────────
 
@@ -151,6 +151,13 @@ async function main(): Promise<void> {
   if (flags.help) {
     printHelp();
     process.exitCode = ExitCode.OK;
+    return;
+  }
+
+  // Require login for the pipeline
+  if (!loadCredentials()) {
+    console.log(`${fmt.bold('Login required.')} Run: ${fmt.bold('aspectcode login')}`);
+    process.exitCode = ExitCode.ERROR;
     return;
   }
 

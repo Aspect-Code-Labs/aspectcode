@@ -1,9 +1,9 @@
 /**
  * Preferences store — persistent learned preferences from developer corrections.
  *
- * Stored in .aspectcode/preferences.json. When a developer dismisses a warning
- * ("this naming is fine for this directory"), the dismissal is recorded as a
- * preference so the same warning doesn't appear again.
+ * Synced to the cloud via the Aspect Code API. Requires login.
+ * When a developer dismisses a warning ("this naming is fine for this directory"),
+ * the dismissal is recorded as a preference so the same warning doesn't appear again.
  */
 
 import * as fs from 'fs';
@@ -47,55 +47,23 @@ export interface PreferencesStore {
   preferences: LearnedPreference[];
 }
 
-// ── Constants ────────────────────────────────────────────────
-
-const DIR_NAME = '.aspectcode';
-const FILE_NAME = 'preferences.json';
-
-// ── Load / Save ──────────────────────────────────────────────
-
-function prefsPath(root: string): string {
-  return path.join(root, DIR_NAME, FILE_NAME);
-}
-
-function loadPreferencesLocal(root: string): PreferencesStore {
-  const p = prefsPath(root);
-  if (!fs.existsSync(p)) {
-    return { version: 1, preferences: [] };
-  }
-  try {
-    const raw = fs.readFileSync(p, 'utf-8');
-    const parsed = JSON.parse(raw) as PreferencesStore;
-    if (parsed.version === 1 && Array.isArray(parsed.preferences)) {
-      // Migrate hub-safety → co-change
-      for (const pref of parsed.preferences) {
-        if (pref.rule === 'hub-safety') pref.rule = 'co-change';
-      }
-      return parsed;
-    }
-    return { version: 1, preferences: [] };
-  } catch {
-    return { version: 1, preferences: [] };
-  }
-}
-
-function savePreferencesLocal(root: string, store: PreferencesStore): void {
-  const dir = path.join(root, DIR_NAME);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  fs.writeFileSync(prefsPath(root), JSON.stringify(store, null, 2) + '\n');
-}
+// ── Helpers ──────────────────────────────────────────────────
 
 function projectName(root: string): string {
   return path.basename(root);
 }
 
-// ── Remote sync (best-effort, never blocks) ─────────────────
+/** Remove legacy local preferences.json if it exists. */
+function cleanupLocalPreferences(root: string): void {
+  const p = path.join(root, '.aspectcode', 'preferences.json');
+  try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+}
 
-async function fetchPreferencesFromRemote(root: string): Promise<LearnedPreference[] | null> {
+// ── Cloud load / save ───────────────────────────────────────
+
+export async function loadPreferences(root: string): Promise<PreferencesStore> {
   const creds = loadCredentials();
-  if (!creds) return null;
+  if (!creds) return { version: 1, preferences: [] };
 
   try {
     const project = projectName(root);
@@ -103,21 +71,33 @@ async function fetchPreferencesFromRemote(root: string): Promise<LearnedPreferen
       `${WEB_APP_URL}/api/cli/preferences?project=${encodeURIComponent(project)}`,
       { headers: { Authorization: `Bearer ${creds.token}` } },
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      store.setSyncStatus('offline');
+      return { version: 1, preferences: [] };
+    }
+
     const data = (await res.json()) as { preferences?: LearnedPreference[] };
-    return data.preferences ?? null;
+    store.setSyncStatus('synced');
+
+    // Clean up legacy local file now that we're on cloud
+    cleanupLocalPreferences(root);
+
+    return {
+      version: 1,
+      preferences: data.preferences ?? [],
+    };
   } catch {
-    return null;
+    store.setSyncStatus('offline');
+    return { version: 1, preferences: [] };
   }
 }
 
-function syncPreferencesToRemote(root: string, prefsStore: PreferencesStore): void {
+export function savePreferences(root: string, prefsStore: PreferencesStore): void {
   const creds = loadCredentials();
   if (!creds) return;
 
   const project = projectName(root);
 
-  // Fire and forget — don't block the pipeline
   store.setSyncStatus('syncing');
   fetch(`${WEB_APP_URL}/api/cli/preferences`, {
     method: 'POST',
@@ -133,39 +113,6 @@ function syncPreferencesToRemote(root: string, prefsStore: PreferencesStore): vo
     .catch(() => {
       store.setSyncStatus('offline');
     });
-}
-
-// ── Public load / save (local + remote) ─────────────────────
-
-export async function loadPreferences(root: string): Promise<PreferencesStore> {
-  const local = loadPreferencesLocal(root);
-
-  // Try to fetch remote preferences and merge (remote wins on conflict)
-  const remote = await fetchPreferencesFromRemote(root);
-  if (remote && remote.length > 0) {
-    store.setSyncStatus('synced');
-  }
-  if (!remote || remote.length === 0) return local;
-
-  // Merge: build a map keyed by id, remote overwrites local
-  const merged = new Map<string, LearnedPreference>();
-  for (const p of local.preferences) merged.set(p.id, p);
-  for (const p of remote) merged.set(p.id, p);
-
-  const result: PreferencesStore = {
-    version: 1,
-    preferences: Array.from(merged.values()),
-  };
-
-  // Update local file with merged result
-  savePreferencesLocal(root, result);
-
-  return result;
-}
-
-export function savePreferences(root: string, prefsStore: PreferencesStore): void {
-  savePreferencesLocal(root, prefsStore);
-  syncPreferencesToRemote(root, prefsStore);
 }
 
 // ── Mutations ────────────────────────────────────────────────
