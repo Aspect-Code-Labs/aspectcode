@@ -20,23 +20,25 @@ interface SettingDef {
   type: 'string' | 'number' | 'boolean' | 'select';
   options?: string[];
   section: 'user' | 'project';
-  configPath: string; // dot-delimited path in the config object
+  configPath: string;
+  defaultValue: string;
 }
 
 const SETTINGS: SettingDef[] = [
   // User settings (cloud)
-  { key: 'provider', label: 'LLM Provider', type: 'select', options: ['openai', 'anthropic', 'grok'], section: 'user', configPath: 'provider' },
-  { key: 'model', label: 'Model', type: 'string', section: 'user', configPath: 'model' },
-  { key: 'temperature', label: 'Temperature', type: 'number', section: 'user', configPath: 'temperature' },
-  { key: 'maxTokens', label: 'Max Tokens', type: 'number', section: 'user', configPath: 'maxTokens' },
+  { key: 'provider', label: 'LLM Provider', type: 'select', options: ['openai', 'anthropic', 'grok'], section: 'user', configPath: 'provider', defaultValue: 'anthropic' },
+  { key: 'model', label: 'Model', type: 'string', section: 'user', configPath: 'model', defaultValue: 'provider default' },
+  { key: 'temperature', label: 'Temperature', type: 'number', section: 'user', configPath: 'temperature', defaultValue: '0.7' },
+  { key: 'maxTokens', label: 'Max Tokens', type: 'number', section: 'user', configPath: 'maxTokens', defaultValue: '4000' },
   // Project settings (local)
-  { key: 'ownership', label: 'Ownership Mode', type: 'select', options: ['full', 'section'], section: 'project', configPath: 'ownership' },
-  { key: 'platform', label: 'Platform', type: 'select', options: ['claude', 'cursor'], section: 'project', configPath: 'platform' },
-  { key: 'exclude', label: 'Exclude Dirs', type: 'string', section: 'project', configPath: 'exclude' },
-  { key: 'evalEnabled', label: 'Probe & Refine', type: 'boolean', section: 'project', configPath: 'evaluate.enabled' },
-  { key: 'maxProbes', label: 'Max Probes', type: 'number', section: 'project', configPath: 'evaluate.maxProbes' },
-  { key: 'maxIterations', label: 'Max Iterations', type: 'number', section: 'project', configPath: 'evaluate.maxIterations' },
-  { key: 'charBudget', label: 'Char Budget', type: 'number', section: 'project', configPath: 'evaluate.charBudget' },
+  { key: 'ownership', label: 'Ownership Mode', type: 'select', options: ['full', 'section'], section: 'project', configPath: 'ownership', defaultValue: 'full' },
+  { key: 'platform', label: 'Platform', type: 'select', options: ['claude', 'cursor'], section: 'project', configPath: 'platform', defaultValue: 'claude' },
+  { key: 'exclude', label: 'Exclude Dirs', type: 'string', section: 'project', configPath: 'exclude', defaultValue: 'none' },
+  { key: 'evalEnabled', label: 'Probe & Refine', type: 'boolean', section: 'project', configPath: 'evaluate.enabled', defaultValue: 'true' },
+  { key: 'maxProbes', label: 'Max Probes', type: 'number', section: 'project', configPath: 'evaluate.maxProbes', defaultValue: '10' },
+  { key: 'maxIterations', label: 'Max Iterations', type: 'number', section: 'project', configPath: 'evaluate.maxIterations', defaultValue: '3' },
+  { key: 'maxEdits', label: 'Max Edits/Iter', type: 'number', section: 'project', configPath: 'evaluate.maxEditsPerIteration', defaultValue: '5' },
+  { key: 'charBudget', label: 'Char Budget', type: 'number', section: 'project', configPath: 'evaluate.charBudget', defaultValue: '8000' },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -79,7 +81,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [draft, setDraft] = useState<Record<string, string>>(() => {
     const d: Record<string, string> = {};
     for (const def of SETTINGS) {
-      d[def.key] = getValue(userSettings, projectConfig, def);
+      const val = getValue(userSettings, projectConfig, def);
+      d[def.key] = val || def.defaultValue;
     }
     return d;
   });
@@ -125,25 +128,33 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     if (key.return || input === ' ') {
       // Save action
       if (cursor === SETTINGS.length) {
-        // Build user settings
+        // Build user settings (skip default-like values)
         const newUser: UserSettings = {};
-        if (draft.provider) newUser.provider = draft.provider;
-        if (draft.model) newUser.model = draft.model;
-        if (draft.temperature) newUser.temperature = parseFloat(draft.temperature) || undefined;
-        if (draft.maxTokens) newUser.maxTokens = parseInt(draft.maxTokens, 10) || undefined;
+        if (draft.provider && draft.provider !== 'anthropic') newUser.provider = draft.provider;
+        else newUser.provider = draft.provider;
+        if (draft.model && draft.model !== 'provider default') newUser.model = draft.model;
+        const temp = parseFloat(draft.temperature);
+        if (!isNaN(temp)) newUser.temperature = temp;
+        const maxTok = parseInt(draft.maxTokens, 10);
+        if (!isNaN(maxTok)) newUser.maxTokens = maxTok;
 
         // Build project config
         const newProject: AspectCodeConfig = {};
         if (draft.ownership) newProject.ownership = draft.ownership as 'full' | 'section';
         if (draft.platform) newProject.platform = draft.platform;
-        if (draft.exclude) newProject.exclude = draft.exclude.split(',').map((s) => s.trim()).filter(Boolean);
+        if (draft.exclude && draft.exclude !== 'none') {
+          newProject.exclude = draft.exclude.split(',').map((s) => s.trim()).filter(Boolean);
+        }
         newProject.evaluate = {};
-        if (draft.evalEnabled) newProject.evaluate.enabled = draft.evalEnabled === 'true';
-        if (draft.maxProbes) newProject.evaluate.maxProbes = parseInt(draft.maxProbes, 10) || undefined;
-        if (draft.maxIterations) newProject.evaluate.maxIterations = parseInt(draft.maxIterations, 10) || undefined;
-        if (draft.charBudget) newProject.evaluate.charBudget = parseInt(draft.charBudget, 10) || undefined;
-        // Clean empty evaluate
-        if (Object.keys(newProject.evaluate).length === 0) delete newProject.evaluate;
+        newProject.evaluate.enabled = draft.evalEnabled === 'true';
+        const probes = parseInt(draft.maxProbes, 10);
+        if (!isNaN(probes)) newProject.evaluate.maxProbes = probes;
+        const iters = parseInt(draft.maxIterations, 10);
+        if (!isNaN(iters)) newProject.evaluate.maxIterations = iters;
+        const edits = parseInt(draft.maxEdits, 10);
+        if (!isNaN(edits)) newProject.evaluate.maxEditsPerIteration = edits;
+        const budget = parseInt(draft.charBudget, 10);
+        if (!isNaN(budget)) newProject.evaluate.charBudget = budget;
 
         onSave(newUser, newProject);
         return;
