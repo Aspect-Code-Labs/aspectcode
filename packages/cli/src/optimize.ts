@@ -81,6 +81,13 @@ export async function tryOptimize(
     env['LLM_PROVIDER'] = providerName;
   }
 
+  // Pass CLI token so the aspectcode hosted provider can authenticate
+  const { loadCredentials } = await import('./auth');
+  const creds = loadCredentials();
+  if (creds && !env['ASPECTCODE_CLI_TOKEN']) {
+    env['ASPECTCODE_CLI_TOKEN'] = creds.token;
+  }
+
   const providerOptions: ProviderOptions = {};
   if (model) providerOptions.model = model;
   if (temperature !== undefined) providerOptions.temperature = temperature;

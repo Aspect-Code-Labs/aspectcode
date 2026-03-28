@@ -118,10 +118,17 @@ export function resolveProvider(
     }
   }
 
+  // Fall back to Aspect Code hosted proxy if user is logged in
+  const cliToken = env['ASPECTCODE_CLI_TOKEN'];
+  if (cliToken) {
+    const { createAspectCodeProvider } = require('./aspectcode');
+    return createAspectCodeProvider(cliToken, opts) as LlmProvider;
+  }
+
   throw new Error(
     'No LLM API key found. To use `aspectcode optimize`, add one of:\n' +
     '  OPENAI_API_KEY=sk-...\n' +
     '  ANTHROPIC_API_KEY=sk-ant-...\n' +
-    'to a .env file in your workspace root.',
+    'to a .env file in your workspace root, or log in with `aspectcode login`.',
   );
 }

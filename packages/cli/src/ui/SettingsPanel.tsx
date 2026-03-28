@@ -36,7 +36,7 @@ const SETTINGS: SettingDef[] = [
   { key: 'exclude', label: 'Exclude Dirs', type: 'string', section: 'project', configPath: 'exclude', defaultValue: 'none' },
   { key: 'evalEnabled', label: 'Probe & Refine', type: 'boolean', section: 'project', configPath: 'evaluate.enabled', defaultValue: 'true' },
   { key: 'maxProbes', label: 'Max Probes', type: 'number', section: 'project', configPath: 'evaluate.maxProbes', defaultValue: '10' },
-  { key: 'maxIterations', label: 'Max Iterations', type: 'number', section: 'project', configPath: 'evaluate.maxIterations', defaultValue: '3' },
+  { key: 'maxIterations', label: 'Max Iterations', type: 'number', section: 'project', configPath: 'evaluate.maxIterations', defaultValue: '1' },
   { key: 'maxEdits', label: 'Max Edits/Iter', type: 'number', section: 'project', configPath: 'evaluate.maxEditsPerIteration', defaultValue: '5' },
   { key: 'charBudget', label: 'Char Budget', type: 'number', section: 'project', configPath: 'evaluate.charBudget', defaultValue: '8000' },
 ];

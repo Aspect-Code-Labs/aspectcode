@@ -215,6 +215,22 @@ const Dashboard: React.FC = () => {
     }
 
     if (!current) {
+      // Suggestions handling
+      if (!store.state.suggestionsDismissed && store.state.suggestions.length > 0) {
+        if (input === 'a') {
+          // Apply all suggestions — handler in pipeline will convert to preferences
+          const handler = (store as any)._onAssessmentAction as ((a: any) => void) | undefined;
+          if (handler) handler({ type: 'apply-suggestions', suggestions: store.state.suggestions });
+          store.dismissSuggestions();
+          return;
+        }
+        if (input === 'i') {
+          store.dismissSuggestions();
+          store.setLearnedMessage('suggestions dismissed');
+          return;
+        }
+      }
+
       // No active assessment — 's' opens settings
       if (input === 's' && store.state.phase === 'watching') {
         const root = store.state.rootPath;
@@ -363,6 +379,17 @@ const Dashboard: React.FC = () => {
       {/* ── Dream cycle in progress ───────────────── */}
       {s.dreaming && (
         <Text color={COLORS.primary}>{`${dreamSpinner} dreaming — refining from ${s.correctionCount} correction${s.correctionCount === 1 ? '' : 's'}…`}</Text>
+      )}
+
+      {/* ── Community suggestions (one-time) ────────── */}
+      {isWatching && !s.suggestionsDismissed && s.suggestions.length > 0 && !current && !s.dreaming && (
+        <Box flexDirection="column">
+          <Text color={COLORS.primary}>{`💡 ${s.suggestions.length} suggestion${s.suggestions.length === 1 ? '' : 's'} based on similar projects:`}</Text>
+          {s.suggestions.slice(0, 5).map((sg, i) => (
+            <Text key={i} color={COLORS.gray}>{`  • ${sg.description}`}</Text>
+          ))}
+          <Text color={COLORS.gray}>{'  [a] apply all  [i] ignore'}</Text>
+        </Box>
       )}
 
       {/* ── Assessment area ───────────────────────── */}

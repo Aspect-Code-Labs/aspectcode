@@ -206,3 +206,37 @@ export function formatPreferencesForPrompt(store: PreferencesStore): string {
 
   return `## Developer preferences\n\nThese rules were explicitly confirmed by the developer during watch mode:\n\n${lines.join('\n')}`;
 }
+
+// ── Community suggestions ───────────────────────────────────
+
+export interface Suggestion {
+  rule: string;
+  disposition: string;
+  directory: string | null;
+  confidence: number;
+  userCount: number;
+  description: string;
+}
+
+export async function fetchSuggestions(
+  language: string,
+  framework?: string,
+): Promise<Suggestion[]> {
+  const creds = loadCredentials();
+  if (!creds) return [];
+
+  try {
+    const params = new URLSearchParams({ language });
+    if (framework) params.set('framework', framework);
+
+    const res = await fetch(
+      `${WEB_APP_URL}/api/cli/suggestions?${params}`,
+      { headers: { Authorization: `Bearer ${creds.token}` } },
+    );
+    if (!res.ok) return [];
+    const data = (await res.json()) as { suggestions?: Suggestion[] };
+    return data.suggestions ?? [];
+  } catch {
+    return [];
+  }
+}

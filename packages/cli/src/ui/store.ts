@@ -184,6 +184,10 @@ export interface DashboardState {
   syncStatus: 'idle' | 'syncing' | 'synced' | 'offline';
   /** Epoch ms of last successful sync. */
   lastSyncAt: number;
+  /** Community suggestions for this project type. */
+  suggestions: Array<{ rule: string; disposition: string; directory: string | null; description: string }>;
+  /** Whether suggestions have been shown/dismissed. */
+  suggestionsDismissed: boolean;
 }
 
 /**
@@ -228,6 +232,8 @@ class DashboardStore extends EventEmitter {
     managedFiles: [],
     syncStatus: 'idle',
     lastSyncAt: 0,
+    suggestions: [],
+    suggestionsDismissed: false,
   };
 
   private update(patch: Partial<DashboardState>): void {
@@ -411,6 +417,14 @@ class DashboardStore extends EventEmitter {
       syncStatus,
       ...(syncStatus === 'synced' ? { lastSyncAt: Date.now() } : {}),
     });
+  }
+
+  setSuggestions(suggestions: DashboardState['suggestions']): void {
+    this.update({ suggestions });
+  }
+
+  dismissSuggestions(): void {
+    this.update({ suggestionsDismissed: true });
   }
 
   /** Update a single managed file's annotation or timestamp. */
