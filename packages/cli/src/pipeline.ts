@@ -514,6 +514,8 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
   // ── Load user settings from cloud ─────────────────────────
   const userSettings = await loadUserSettings();
+  // Stash for Dashboard settings panel access
+  (store as any)._userSettings = userSettings;
 
   // ── Initial run (with probe and refine) ────────────────────
   const result = await runOnce(ctx, ownership, true, undefined, activePlatform, userSettings);

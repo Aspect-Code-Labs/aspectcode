@@ -13,6 +13,9 @@ import { COLORS } from './theme';
 import { store } from './store';
 import type { DashboardState, PipelinePhase, EvalPhase } from './store';
 import MemoryMap from './MemoryMap';
+import SettingsPanel from './SettingsPanel';
+import type { UserSettings, AspectCodeConfig } from '../config';
+import { loadConfig, saveConfig, saveUserSettings } from '../config';
 
 // ── Spinner ──────────────────────────────────────────────────
 
@@ -162,6 +165,10 @@ const SEP_CHAR = '┄';
 
 const Dashboard: React.FC = () => {
   const [s, setS] = useState<DashboardState>({ ...store.state });
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsUserData, setSettingsUserData] = useState<UserSettings>({});
+  const [settingsProjectData, setSettingsProjectData] = useState<AspectCodeConfig>({});
+
   useEffect(() => {
     const fn = () => setS({ ...store.state });
     store.on('change', fn);
@@ -173,6 +180,8 @@ const Dashboard: React.FC = () => {
 
   // ── Keyboard handling ──────────────────────────────────────
   useInput((input: string, _key: Key) => {
+    // Settings panel handles its own input when open
+    if (showSettings) return;
     if (input === 'x') {
       const evalPhase = store.state.evalStatus.phase;
       if (evalPhase !== 'idle' && evalPhase !== 'done') {
@@ -205,7 +214,17 @@ const Dashboard: React.FC = () => {
       return;
     }
 
-    if (!current) return;
+    if (!current) {
+      // No active assessment — 's' opens settings
+      if (input === 's' && store.state.phase === 'watching') {
+        const root = store.state.rootPath;
+        setSettingsProjectData(loadConfig(root) ?? {});
+        // User settings are loaded from store (set by pipeline on startup)
+        setSettingsUserData((store as any)._userSettings ?? {});
+        setShowSettings(true);
+      }
+      return;
+    }
     if (input === 'n') {
       handler({ type: 'dismiss', assessment: current });
     } else if (input === 'y') {
@@ -237,6 +256,28 @@ const Dashboard: React.FC = () => {
 
   // ── Build header info ──────────────────────────────────────
   const rootLabel = s.rootPath ? s.rootPath.replace(/\\/g, '/').split('/').pop() || s.rootPath : '';
+
+  // ── Settings panel ────────────────────────────────────────
+  if (showSettings) {
+    return (
+      <SettingsPanel
+        userSettings={settingsUserData}
+        projectConfig={settingsProjectData}
+        onSave={(user, project) => {
+          const root = s.rootPath;
+          // Save user settings to cloud
+          saveUserSettings(user);
+          // Save project settings to local file
+          if (root) saveConfig(root, project);
+          // Store user settings for future reference
+          (store as any)._userSettings = user;
+          setShowSettings(false);
+          store.setLearnedMessage('Settings saved');
+        }}
+        onCancel={() => setShowSettings(false)}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column">
@@ -387,6 +428,7 @@ const Dashboard: React.FC = () => {
           <Text color={s.correctionCount > 0 ? COLORS.primaryDim : COLORS.gray} dimColor={s.correctionCount === 0}>{'[d] dream'}</Text>
           <Text color={COLORS.primaryDim}>{'  [r] probe & refine'}</Text>
           {s.recommendProbe ? <Text color={COLORS.primary}>{' ●'}</Text> : null}
+          <Text color={COLORS.gray}>{'  [s] settings'}</Text>
         </Text>
       )}
     </Box>
