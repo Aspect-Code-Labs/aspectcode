@@ -406,25 +406,106 @@ export async function resolveRunMode(root: string): Promise<RunMode> {
     return { ownership: config.ownership, generate: true };
   }
 
+  const agentsPath = path.join(root, 'AGENTS.md');
+  let existingContent: string | null = null;
+
   try {
-    const agentsPath = path.join(root, 'AGENTS.md');
     if (fs.existsSync(agentsPath)) {
-      const existing = fs.readFileSync(agentsPath, 'utf-8');
-      if (hasMarkers(existing)) return { ownership: 'section', generate: true };
-      return { ownership: 'full', generate: false };
+      existingContent = fs.readFileSync(agentsPath, 'utf-8');
+      if (hasMarkers(existingContent)) return { ownership: 'section', generate: true };
     }
   } catch { /* fall through */ }
 
   try {
-    const idx = await selectPrompt(
-      'How should AspectCode manage AGENTS.md?',
-      ['Full control (replace entire file)', 'Section control (preserve your content)'],
-      0,
-    );
-    return { ownership: idx === 1 ? 'section' : 'full', generate: true };
+    const hasExisting = existingContent !== null;
+    const options = hasExisting
+      ? ['Full control (replace entire file)', 'Section control (preserve your content)', 'Preview current AGENTS.md']
+      : ['Full control (replace entire file)', 'Section control (preserve your content)'];
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const idx = await selectPrompt(
+        'How should AspectCode manage AGENTS.md?',
+        options,
+        0,
+      );
+
+      // Preview option — show content, then loop back to prompt
+      if (hasExisting && idx === 2) {
+        showFilePreview(existingContent!);
+        continue;
+      }
+
+      return { ownership: idx === 1 ? 'section' : 'full', generate: true };
+    }
   } catch {
     return { ownership: 'full', generate: true };
   }
+}
+
+/**
+ * Display file content in a scrollable pager-like view.
+ * Press any key to return.
+ */
+function showFilePreview(content: string): Promise<void> {
+  return new Promise((resolve) => {
+    const lines = content.split('\n');
+    const termHeight = process.stdout.rows || 24;
+    const visibleLines = termHeight - 4; // leave room for header/footer
+    let scrollOffset = 0;
+
+    const render = () => {
+      process.stdout.write('\x1b[2J\x1b[H'); // clear screen
+      process.stdout.write('\x1b[35m── AGENTS.md preview ──\x1b[0m\n\n');
+
+      const slice = lines.slice(scrollOffset, scrollOffset + visibleLines);
+      for (const line of slice) {
+        process.stdout.write(`  ${line}\n`);
+      }
+
+      const pct = lines.length <= visibleLines
+        ? 100
+        : Math.round(((scrollOffset + visibleLines) / lines.length) * 100);
+      process.stdout.write(`\n\x1b[90m  ↑/↓ scroll · q/esc to go back · ${pct}%\x1b[0m`);
+    };
+
+    render();
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf-8');
+
+    const onData = (key: string) => {
+      if (key === '\x1b[A' || key === 'k') {
+        scrollOffset = Math.max(0, scrollOffset - 1);
+        render();
+      } else if (key === '\x1b[B' || key === 'j') {
+        scrollOffset = Math.min(Math.max(0, lines.length - visibleLines), scrollOffset + 1);
+        render();
+      } else if (key === '\x1b[5~') {
+        // Page Up
+        scrollOffset = Math.max(0, scrollOffset - visibleLines);
+        render();
+      } else if (key === '\x1b[6~') {
+        // Page Down
+        scrollOffset = Math.min(Math.max(0, lines.length - visibleLines), scrollOffset + visibleLines);
+        render();
+      } else if (key === 'q' || key === '\x1b' || key === '\r' || key === '\n') {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onData);
+        process.stdout.write('\x1b[2J\x1b[H'); // clear screen
+        resolve();
+      } else if (key === '\x03') {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onData);
+        process.exit(130);
+      }
+    };
+
+    process.stdin.on('data', onData);
+  });
 }
 
 // ── Assessment action handler ────────────────────────────────
