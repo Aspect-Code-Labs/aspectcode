@@ -44,6 +44,7 @@ import {
 } from './dreamCycle';
 import { extractScopedRules, writeScopedRules, deleteScopedRules } from './scopedRules';
 import type { ScopedRule } from './scopedRules';
+import { autoResolveAssessment } from './autoResolve';
 import { loadCredentials, startBackgroundLogin } from './auth';
 import type { ManagedFile } from './ui/store';
 import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
@@ -529,8 +530,9 @@ function showFilePreview(content: string): Promise<void> {
 // ── Assessment action handler ────────────────────────────────
 
 export interface AssessmentAction {
-  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine' | 'dream' | 'login';
+  type: 'dismiss' | 'confirm' | 'skip' | 'probe-and-refine' | 'dream' | 'login' | 'accept-ai' | 'apply-suggestions';
   assessment?: ChangeAssessment;
+  suggestions?: any[];
 }
 
 async function handleAssessmentAction(
@@ -616,8 +618,9 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   // Stash for Dashboard settings panel access
   (store as any)._userSettings = userSettings;
 
-  // ── Initial run (with probe and refine) ────────────────────
-  const result = await runOnce(ctx, ownership, true, undefined, activePlatform, userSettings);
+  // ── Initial run — only probe-and-refine on first run (no existing AGENTS.md)
+  const initialProbeAndRefine = !fs.existsSync(path.join(root, 'AGENTS.md'));
+  const result = await runOnce(ctx, ownership, initialProbeAndRefine, undefined, activePlatform, userSettings);
   ctx.generate = true;
   if (result.code !== ExitCode.OK) return result.code;
 
@@ -626,6 +629,15 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   // ── Load preferences ───────────────────────────────────────
   let prefs = await loadPreferences(root);
   store.setPreferenceCount(prefs.preferences.length);
+
+  // ── Resolve provider for auto-resolve in watch mode ────────
+  let watchProvider: import('@aspectcode/optimizer').LlmProvider | undefined;
+  try {
+    const env = loadEnvFile(root);
+    const creds = loadCredentials();
+    if (creds) env['ASPECTCODE_CLI_TOKEN'] = creds.token;
+    watchProvider = resolveProvider(env);
+  } catch { /* no LLM — assessments go to user as before */ }
 
   // ── Watch mode with real-time evaluation ───────────────────
   log.blank();
@@ -754,7 +766,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
   const RECOMMEND_THRESHOLD = 10;
 
-  const evaluateEvents = (events: FileChangeEvent[]): void => {
+  const evaluateEvents = async (events: FileChangeEvent[]): Promise<void> => {
     const state = getRuntimeState();
     if (!state.model || !state.agentsContent) return;
 
@@ -783,7 +795,42 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
         fileContents: state.fileContents,
       });
 
-      store.pushAssessments(assessments);
+      // Auto-resolve assessments with LLM when available
+      const actionable = assessments.filter((a) => a.type !== 'ok');
+      const threshold = flags.background ? 0.0 : (userSettings?.autoResolveThreshold ?? 0.8);
+
+      if (watchProvider && actionable.length > 0) {
+        const forwarded: ChangeAssessment[] = [];
+        for (const a of actionable) {
+          try {
+            const result = await autoResolveAssessment(a, prefs, watchProvider, { threshold });
+            if (result.autoResolved) {
+              const dir = path.dirname(a.file) + '/';
+              if (result.decision === 'allow') {
+                prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'allow', directory: dir, details: a.details, dependencyContext: a.dependencyContext });
+              } else {
+                prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'deny', file: a.file, directory: dir, details: a.details, suggestion: a.suggestion, dependencyContext: a.dependencyContext });
+              }
+              savePreferences(root, prefs);
+              store.setPreferenceCount(prefs.preferences.length);
+              addCorrection(result.decision === 'allow' ? 'dismiss' : 'confirm', a);
+              store.setLearnedMessage(`Auto: ${result.decision} ${a.rule} (${Math.round(result.confidence * 100)}%)`);
+              const stats = { ...store.state.assessmentStats };
+              stats.autoResolved++;
+              store.state.assessmentStats = stats;
+            } else {
+              // Attach recommendation for display
+              a.llmRecommendation = { decision: result.decision, confidence: result.confidence, reasoning: result.reasoning };
+              forwarded.push(a);
+            }
+          } catch {
+            forwarded.push(a); // LLM failed — forward to user
+          }
+        }
+        store.pushAssessments(forwarded);
+      } else {
+        store.pushAssessments(assessments);
+      }
 
       // Change flash for clean changes
       const hasNonOk = assessments.some((a) => a.type !== 'ok');

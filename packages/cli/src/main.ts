@@ -7,6 +7,8 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { spawn } from 'child_process';
 import type { CliFlags } from './cli';
 import { ExitCode, FLAG_DEFS, flagPropName } from './cli';
@@ -137,27 +139,46 @@ function spawnInTerminal(): boolean {
     let child;
 
     if (process.platform === 'win32') {
-      child = spawn('cmd', ['/c', 'start', '"Aspect Code"', 'cmd', '/k', nodeExe, binPath, ...forwardedArgs], {
+      // Write a temp .bat file to avoid quoting hell with spaces in paths.
+      // cmd /k + start can't reliably handle "C:\Program Files\..." nesting.
+      const batPath = path.join(os.tmpdir(), `aspectcode-bg-${Date.now()}.bat`);
+      const argsStr = forwardedArgs.length > 0 ? ' ' + forwardedArgs.join(' ') : '';
+      fs.writeFileSync(batPath, `@echo off\r\n"${nodeExe}" "${binPath}"${argsStr}\r\n`);
+
+      child = spawn('cmd.exe', ['/c', 'start', 'cmd.exe', '/k', batPath], {
         detached: true,
         stdio: 'ignore',
-        shell: true,
       });
+
+      // Clean up bat file after a delay (the new terminal has already read it)
+      setTimeout(() => { try { fs.unlinkSync(batPath); } catch { /* ignore */ } }, 5000);
+
     } else if (process.platform === 'darwin') {
-      const cmd = [nodeExe, binPath, ...forwardedArgs].map((a) => `"${a}"`).join(' ');
-      child = spawn('osascript', ['-e', `tell app "Terminal" to do script "${cmd.replace(/"/g, '\\"')}"`], {
+      const escaped = [nodeExe, binPath, ...forwardedArgs]
+        .map((a) => a.replace(/\\/g, '\\\\').replace(/"/g, '\\"'))
+        .join(' ');
+      child = spawn('osascript', ['-e', `tell app "Terminal" to do script "${escaped}"`], {
         detached: true,
         stdio: 'ignore',
       });
+
     } else {
-      const fullCmd = [nodeExe, binPath, ...forwardedArgs];
-      child = spawn('gnome-terminal', ['--', ...fullCmd], {
-        detached: true,
-        stdio: 'ignore',
-      });
+      // Linux: try gnome-terminal, fall back to xterm
+      try {
+        child = spawn('gnome-terminal', ['--', nodeExe, binPath, ...forwardedArgs], {
+          detached: true,
+          stdio: 'ignore',
+        });
+      } catch {
+        child = spawn('xterm', ['-e', nodeExe, binPath, ...forwardedArgs], {
+          detached: true,
+          stdio: 'ignore',
+        });
+      }
     }
 
     child.unref();
-    console.log(`◆ aspect code running in background${child.pid ? ` (pid ${child.pid})` : ''}`);
+    console.log('◆ aspect code running in background');
     process.exitCode = ExitCode.OK;
     return true;
   } catch {

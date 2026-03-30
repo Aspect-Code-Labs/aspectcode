@@ -149,9 +149,9 @@ function evalText(phase: EvalPhase, s: DashboardState['evalStatus']): string | n
     }
     case 'diagnosing': {
       const detail = s.weakCount !== undefined && s.strongCount !== undefined
-        ? ` — ${s.strongCount} passed, ${s.weakCount} gap${s.weakCount === 1 ? '' : 's'}`
+        ? ` — ${s.weakCount} gap${s.weakCount === 1 ? '' : 's'} found`
         : '';
-      return `${round}Diagnosing weaknesses${detail}…`;
+      return `${round}Identifying improvements${detail}…`;
     }
     case 'applying': {
       const count = s.proposedEditCount ? ` ${s.proposedEditCount}` : '';
@@ -399,9 +399,8 @@ const Dashboard: React.FC = () => {
             <>
               {s.evalStatus.probeResults.map((pr, i) => {
                 if (pr.status === 'pending') return null;
-                const icon = pr.status === 'strong' ? '✓' : '✗';
-                const color = pr.status === 'strong' ? COLORS.gray : COLORS.yellow;
-                return <Text key={`pr-${i}`} color={color}>{`  ${icon} ${pr.task}`}</Text>;
+                if (pr.status === 'strong') return null; // Only show gaps, not passes
+                return <Text key={`pr-${i}`} color={COLORS.gray}>{`  ○ gap: ${pr.task}`}</Text>;
               })}
             </>
           )}
