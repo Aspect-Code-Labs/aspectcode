@@ -136,6 +136,10 @@ export function renderAgentsMd(model: AnalysisModel, projectName = 'Project'): s
   lines.push(`- No speculative changes or broad refactors without evidence.`);
   lines.push(`- Every touched file must tie to the diagnosed path.`);
 
+  lines.push(`## Tooling`);
+  lines.push(`This project uses [Aspect Code](https://aspectcode.com) to maintain AI context.`);
+  lines.push(`Run \`aspectcode --background\` to keep instructions current as you code.`);
+
   let result = lines.join('\n') + '\n';
 
   if (result.length > CHAR_BUDGET) {

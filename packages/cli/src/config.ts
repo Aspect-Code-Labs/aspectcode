@@ -19,7 +19,7 @@ export interface AspectCodeConfig {
   /** AGENTS.md ownership: 'full' overwrites the file, 'section' uses markers. */
   ownership?: 'full' | 'section';
 
-  /** API key for Bring Your Own Key mode. Overrides hosted proxy. */
+  /** Your own OpenAI or Anthropic API key. Provider auto-detected from key prefix (sk-ant- = Anthropic, sk- = OpenAI). */
   apiKey?: string;
 
   /** @deprecated Use `platforms` instead. Kept for backward compat. */

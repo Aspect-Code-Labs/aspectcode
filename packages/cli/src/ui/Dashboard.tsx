@@ -574,8 +574,8 @@ const Dashboard: React.FC = () => {
             {`Token limit reached (${formatTokens(s.tierTokensCap)} ${s.userTier === 'free' ? 'lifetime' : 'weekly'} tokens used).`}
           </Text>
           <Text color={COLORS.gray}>{''}</Text>
-          <Text color={COLORS.primaryDim}>{'  [u] Upgrade to Pro ($8/mo — 1M tokens/week)'}</Text>
-          <Text color={COLORS.primaryDim}>{'  [k] Add your own API key: ASPECTCODE_LLM_KEY=sk-...'}</Text>
+          <Text color={COLORS.primaryDim}>{'  [u] Upgrade to Pro ($8/mo — 1M tokens/week + community suggestions)'}</Text>
+          <Text color={COLORS.primaryDim}>{'  [k] Add your own OpenAI/Anthropic key: ASPECTCODE_LLM_KEY=sk-...'}</Text>
         </Box>
       )}
 
@@ -587,11 +587,11 @@ const Dashboard: React.FC = () => {
           </Text>
         )
       ) : s.userTier === 'pro' ? (
-        <Text color={COLORS.gray} dimColor>
+        <Text color={s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.95 ? COLORS.red : s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.8 ? COLORS.yellow : COLORS.gray} dimColor={s.tierTokensCap === 0 || s.tierTokensUsed / s.tierTokensCap < 0.8}>
           {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} weekly tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}${s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`}
         </Text>
       ) : s.tierTokensUsed >= 75_000 ? (
-        <Text color={COLORS.gray} dimColor>
+        <Text color={s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.95 ? COLORS.red : s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.8 ? COLORS.yellow : COLORS.gray} dimColor={s.tierTokensCap === 0 || s.tierTokensUsed / s.tierTokensCap < 0.8}>
           {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} lifetime tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}`}
         </Text>
       ) : (

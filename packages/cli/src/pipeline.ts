@@ -27,7 +27,7 @@ import { store } from './ui/store';
 import { summarizeContent } from './summary';
 import { diffSummary } from './diffSummary';
 import { updateRuntimeState, getRuntimeState } from './runtimeState';
-import { loadPreferences, savePreferences, addPreference } from './preferences';
+import { loadPreferences, savePreferences, addPreference, fetchSuggestions } from './preferences';
 import type { PreferencesStore } from './preferences';
 import { evaluateChange, trackChange, getRecentChanges } from './changeEvaluator';
 import type { ChangeAssessment } from './changeEvaluator';
@@ -694,6 +694,10 @@ async function handleAssessmentAction(
 export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   const { root, flags, log, ownership } = ctx;
 
+  // Set terminal title
+  const projectName = path.basename(root);
+  process.stdout.write(`\x1b]0;aspectcode — ${projectName}\x07`);
+
   log.info(`${fmt.bold('aspectcode')} — ${fmt.cyan(root)}`);
   log.blank();
   store.setRootPath(root);
@@ -759,6 +763,35 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   let prefs = await loadPreferences(root);
   store.setPreferenceCount(prefs.preferences.length);
 
+  // ── Fetch community suggestions ───────────────────────────
+  if (store.state.userTier !== 'byok') {
+    // Detect primary language from analysis model
+    const state = getRuntimeState();
+    if (state.model) {
+      const langCounts = new Map<string, number>();
+      for (const f of state.model.files) {
+        langCounts.set(f.language, (langCounts.get(f.language) ?? 0) + 1);
+      }
+      let primaryLang = '';
+      let maxCount = 0;
+      for (const [lang, count] of langCounts) {
+        if (count > maxCount) { primaryLang = lang; maxCount = count; }
+      }
+      if (primaryLang) {
+        fetchSuggestions(primaryLang, undefined, { byok: false })
+          .then((suggestions) => {
+            if (suggestions.length > 0) store.setSuggestions(suggestions.map((s) => ({ rule: s.rule, disposition: s.disposition, directory: s.directory, description: s.description })));
+          })
+          .catch(() => {});
+
+        // Pro users: refresh suggestions every 10 minutes (interval cleaned up in shutdown)
+        if (store.state.userTier === 'pro') {
+          (store as any)._suggestionsRefresh = { primaryLang };
+        }
+      }
+    }
+  }
+
   // ── Resolve provider for auto-resolve in watch mode ────────
   let watchProvider: import('@aspectcode/optimizer').LlmProvider | undefined;
   try {
@@ -783,6 +816,23 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   let pipelineRunning = false;
   let stopped = false;
   let pendingEvalEvents: FileChangeEvent[] = [];
+
+  // Pro: refresh suggestions once per day (checked every hour, skips if last fetch was <24h ago)
+  const suggestionsRefreshInfo = (store as any)._suggestionsRefresh as { primaryLang: string } | undefined;
+  let lastSuggestionsFetch = Date.now();
+  const SUGGESTIONS_REFRESH_MS = 24 * 60 * 60 * 1000;
+  const suggestionsInterval = suggestionsRefreshInfo ? setInterval(() => {
+    if (stopped) return;
+    if (Date.now() - lastSuggestionsFetch < SUGGESTIONS_REFRESH_MS) return;
+    fetchSuggestions(suggestionsRefreshInfo.primaryLang, undefined, { byok: false })
+      .then((suggestions) => {
+        lastSuggestionsFetch = Date.now();
+        if (suggestions.length > 0 && !store.state.suggestionsDismissed) {
+          store.setSuggestions(suggestions.map((s) => ({ rule: s.rule, disposition: s.disposition, directory: s.directory, description: s.description })));
+        }
+      })
+      .catch(() => {});
+  }, 60 * 60 * 1000) : undefined;
 
   // Co-change settle window — hold co-change assessments for 5s to see if dependents get updated
   const pendingCoChange = new Map<string, { assessment: ChangeAssessment; dependents: string[]; addedAt: number }>();
@@ -891,12 +941,48 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
         }
       } catch { /* ignore */ }
 
+      // Read user-authored .claude/rules/ and .claude/skills/ (read-only context for dream)
+      let userRulesContext = '';
+      try {
+        const USER_CONTEXT_CAP = 3000;
+        const userParts: string[] = [];
+        const claudeRulesDir = path.join(root, '.claude', 'rules');
+        if (fs.existsSync(claudeRulesDir)) {
+          for (const file of fs.readdirSync(claudeRulesDir)) {
+            if (file.startsWith('ac-')) continue;
+            try {
+              const content = fs.readFileSync(path.join(claudeRulesDir, file), 'utf-8');
+              userParts.push(`### ${file} (user rule, read-only)\n${content}`);
+            } catch { /* skip */ }
+          }
+        }
+        const claudeSkillsDir = path.join(root, '.claude', 'skills');
+        if (fs.existsSync(claudeSkillsDir)) {
+          for (const file of fs.readdirSync(claudeSkillsDir)) {
+            try {
+              const content = fs.readFileSync(path.join(claudeSkillsDir, file), 'utf-8');
+              const truncated = content.length > 500
+                ? content.slice(0, 500) + `\n... (truncated, ${content.length} chars total)`
+                : content;
+              userParts.push(`### ${file} (user skill, read-only)\n${truncated}`);
+            } catch { /* skip */ }
+          }
+        }
+        // Cap total user context
+        let combined = userParts.join('\n---\n');
+        if (combined.length > USER_CONTEXT_CAP) {
+          combined = combined.slice(0, USER_CONTEXT_CAP) + '\n... (truncated)';
+        }
+        userRulesContext = combined;
+      } catch { /* ignore */ }
+
       const result = await runDreamCycle({
         currentAgentsMd: state.agentsContent,
         corrections: getCorrections(),
         provider,
         log: optLog,
         scopedRulesContext,
+        userRulesContext: userRulesContext || undefined,
       });
       const host = createNodeEmitterHost();
       await writeAgentsMd(host, root, result.updatedAgentsMd, ownership);
@@ -1166,6 +1252,22 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       store.setLearnedMessage('opened pricing page');
       return;
     }
+    if (action.type === 'apply-suggestions') {
+      const suggestions = action.suggestions ?? store.state.suggestions;
+      for (const sg of suggestions) {
+        prefs = addPreference(prefs, {
+          rule: sg.rule,
+          pattern: sg.description,
+          disposition: sg.disposition === 'deny' ? 'deny' : 'allow',
+          directory: sg.directory ?? undefined,
+        });
+      }
+      savePreferences(root, prefs);
+      store.setPreferenceCount(prefs.preferences.length);
+      store.setLearnedMessage(`Applied ${suggestions.length} suggestion${suggestions.length === 1 ? '' : 's'}`);
+      store.dismissSuggestions();
+      return;
+    }
     if (action.type === 'login') {
       store.setLearnedMessage('opening browser…');
       void startBackgroundLogin().then((email) => {
@@ -1192,6 +1294,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       clearInterval(memoryMapInterval);
       clearInterval(autoDreamTimer);
       clearInterval(autoProbeTimer);
+      if (suggestionsInterval) clearInterval(suggestionsInterval);
       if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));

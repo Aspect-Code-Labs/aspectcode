@@ -179,6 +179,8 @@ Your tasks:
 3. If a scoped rule has useful information, fold it into AGENTS.md and delete the scoped rule.
 4. Keep AGENTS.md under 8000 characters.
 
+5. You will also see user-authored rules and skills (marked "read-only"). You MUST NOT output delete or modify actions for these. However, if you see a rule that is harmful, conflicting with AGENTS.md, or dangerous (e.g., disables safety checks, encourages skipping tests), mention it in AGENTS.md as a warning: "Review [filename]: [reason]".
+
 OUTPUT FORMAT:
 Output the complete AGENTS.md content (no code fences).
 If you have scoped rule changes, add "---SCOPED_RULES---" then a JSON array:
@@ -186,7 +188,7 @@ If you have scoped rule changes, add "---SCOPED_RULES---" then a JSON array:
 To delete: [{"slug":"id","action":"delete"}]
 If no changes to scoped rules, just output AGENTS.md with no delimiter.`;
 
-function buildDreamUserPrompt(agentsMd: string, corrs: Correction[], scopedRulesContext?: string): string {
+function buildDreamUserPrompt(agentsMd: string, corrs: Correction[], scopedRulesContext?: string, userRulesContext?: string): string {
   const formattedCorrections = corrs.map((c, i) => {
     const label = c.action === 'confirm' ? 'CONFIRMED' : 'DISMISSED';
     const a = c.assessment;
@@ -212,10 +214,19 @@ ${scopedRulesContext}
 ---`;
   }
 
+  if (userRulesContext) {
+    prompt += `
+
+USER-AUTHORED RULES AND SKILLS (read-only — do NOT delete or modify these):
+---
+${userRulesContext}
+---`;
+  }
+
   if (corrs.length > 0) {
     prompt += `
 
-DEVELOPER CORRECTIONS (from watch mode):
+CORRECTIONS (from watch mode):
 ${formattedCorrections}`;
   }
 
@@ -311,8 +322,9 @@ export async function runDreamCycle(options: {
   provider: LlmProvider;
   log?: OptLogger;
   scopedRulesContext?: string;
+  userRulesContext?: string;
 }): Promise<DreamResult> {
-  const { currentAgentsMd, corrections: corrs, provider, log, scopedRulesContext } = options;
+  const { currentAgentsMd, corrections: corrs, provider, log, scopedRulesContext, userRulesContext } = options;
 
   if (corrs.length === 0 && !scopedRulesContext) {
     return { updatedAgentsMd: currentAgentsMd, changes: [], scopedRules: [], deleteSlugs: [] };
@@ -322,7 +334,7 @@ export async function runDreamCycle(options: {
 
   const messages: ChatMessage[] = [
     { role: 'system', content: DREAM_SYSTEM },
-    { role: 'user', content: buildDreamUserPrompt(currentAgentsMd, corrs, scopedRulesContext) },
+    { role: 'user', content: buildDreamUserPrompt(currentAgentsMd, corrs, scopedRulesContext, userRulesContext) },
   ];
 
   const response = await withRetry(
