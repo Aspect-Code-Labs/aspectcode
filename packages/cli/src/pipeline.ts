@@ -844,7 +844,9 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       markProcessed();
       store.setCorrectionCount(getUnprocessedCount());
       saveDreamState(root, { lastDreamAt: new Date().toISOString() });
-      store.setLearnedMessage(`Refined: ${result.changes.join(', ')}`);
+      if (result.changes.length > 0) {
+        store.setLearnedMessage(`Refined: ${result.changes.join(', ')}`);
+      }
       // Refresh memory map to reflect any new files
       store.setManagedFiles(buildManagedFiles(root, (await loadPreferences(root)).preferences.length, activePlatforms));
     } catch (err) {

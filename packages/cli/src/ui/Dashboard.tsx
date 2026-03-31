@@ -558,13 +558,16 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
-      {/* ── Usage tracker (always visible) ────────────── */}
-      {s.sessionUsage.calls > 0 && (
+      {/* ── Usage tracker (always visible for free/pro, after first call for byok) ── */}
+      {s.userTier === 'byok' ? (
+        s.sessionUsage.calls > 0 && (
+          <Text color={COLORS.gray} dimColor>
+            {`${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}  (BYOK)`}
+          </Text>
+        )
+      ) : (
         <Text color={COLORS.gray} dimColor>
-          {s.userTier === 'byok'
-            ? `${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}  (BYOK)`
-            : `${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} ${s.userTier === 'free' ? 'lifetime' : 'weekly'} tokens · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}${s.userTier === 'pro' && s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`
-          }
+          {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} ${s.userTier === 'free' ? 'lifetime' : 'weekly'} tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}${s.userTier === 'pro' && s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`}
         </Text>
       )}
     </Box>
