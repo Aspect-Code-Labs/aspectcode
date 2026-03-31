@@ -43,6 +43,8 @@ export interface ChangeContext {
   preferences: PreferencesStore;
   recentChanges: TimestampedChange[];
   fileContents?: ReadonlyMap<string, string>;
+  /** Hub inDegree counts from previous analysis (for new-hub detection). */
+  previousHubCounts?: ReadonlyMap<string, number>;
 }
 
 // ── Burst tracker ────────────────────────────────────────────
@@ -96,6 +98,11 @@ export function evaluateChange(
       assessments.push(...checkExportContract(event.path, ctx));
       assessments.push(...checkCircularDependency(event.path, ctx));
       assessments.push(...checkTestCoverageGap(event.path, ctx));
+      assessments.push(...checkFileSize(event.path, ctx));
+      assessments.push(...checkNewHub(event.path, ctx));
+      assessments.push(...checkCrossBoundary(event.path, ctx));
+      assessments.push(...checkStaleImport(event.path, ctx));
+      assessments.push(...checkInheritanceChange(event.path, ctx));
     }
   }
 
@@ -542,6 +549,189 @@ function checkTestCoverageGap(file: string, ctx: ChangeContext): ChangeAssessmen
     details: `${matchedTestFile} may need updates`,
     suggestion: `Consider updating ${matchedTestFile} to cover the changes in ${file}`,
     dependencyContext: `Source: ${file}, test: ${matchedTestFile}`,
+    dismissable: true,
+  }];
+}
+
+// ── Check 8: File size growth ────────────────────────────────
+
+const FILE_SIZE_THRESHOLD = 500;
+const FILE_SIZE_GROWTH = 100;
+
+function checkFileSize(file: string, ctx: ChangeContext): ChangeAssessment[] {
+  if (!ctx.fileContents) return [];
+  const content = ctx.fileContents.get(file);
+  if (!content) return [];
+
+  const currentLines = content.split('\n').length;
+  const modelFile = ctx.model.files.find((f) => f.relativePath === file);
+  const previousLines = modelFile?.lineCount ?? 0;
+
+  // Only fire if over threshold OR grew by a lot
+  if (currentLines < FILE_SIZE_THRESHOLD && currentLines - previousLines < FILE_SIZE_GROWTH) return [];
+  // Don't fire if file was already large (only on crossing threshold or big growth)
+  if (previousLines >= FILE_SIZE_THRESHOLD && currentLines - previousLines < FILE_SIZE_GROWTH) return [];
+
+  return [{
+    file,
+    type: 'warning',
+    rule: 'file-size',
+    message: currentLines >= FILE_SIZE_THRESHOLD
+      ? `File is ${currentLines} lines (threshold: ${FILE_SIZE_THRESHOLD})`
+      : `File grew by ${currentLines - previousLines} lines (now ${currentLines})`,
+    suggestion: `Consider splitting ${file} into smaller modules.`,
+    dismissable: true,
+  }];
+}
+
+// ── Check 9: New hub detection ──────────────────────────────
+
+const HUB_THRESHOLD = 3;
+
+function checkNewHub(file: string, ctx: ChangeContext): ChangeAssessment[] {
+  // Count current inDegree for this file
+  let inDegree = 0;
+  for (const edge of ctx.model.graph.edges) {
+    if ((edge.type === 'import' || edge.type === 'call') && edge.target === file) {
+      inDegree++;
+    }
+  }
+
+  if (inDegree < HUB_THRESHOLD) return [];
+
+  const previousInDegree = ctx.previousHubCounts?.get(file) ?? 0;
+  if (previousInDegree >= HUB_THRESHOLD) return []; // was already a hub
+
+  return [{
+    file,
+    type: 'warning',
+    rule: 'new-hub',
+    message: `Now imported by ${inDegree} files — becoming a hub`,
+    details: `Changes to this file will affect ${inDegree} dependents.`,
+    suggestion: `${file} is becoming a shared dependency. Ensure its API is stable and well-tested.`,
+    dismissable: true,
+  }];
+}
+
+// ── Check 10: Cross-boundary import ─────────────────────────
+
+function checkCrossBoundary(file: string, ctx: ChangeContext): ChangeAssessment[] {
+  if (!ctx.fileContents) return [];
+  const content = ctx.fileContents.get(file);
+  if (!content) return [];
+
+  const fileSegment = file.split('/')[0];
+  if (!fileSegment) return [];
+
+  // Only check if the top-level dir has enough files to be a real boundary
+  const dirFileCounts = new Map<string, number>();
+  for (const f of ctx.model.files) {
+    const seg = f.relativePath.split('/')[0];
+    dirFileCounts.set(seg, (dirFileCounts.get(seg) ?? 0) + 1);
+  }
+  if ((dirFileCounts.get(fileSegment) ?? 0) < 3) return [];
+
+  const modelFile = ctx.model.files.find((f) => f.relativePath === file);
+  const previousImports = new Set(modelFile?.imports ?? []);
+  const currentImports = extractImports(content);
+  const newImports = currentImports.filter((imp) => !previousImports.has(imp));
+
+  const assessments: ChangeAssessment[] = [];
+
+  for (const imp of newImports) {
+    const resolved = resolveRelativeImport(file, imp);
+    if (!resolved) continue;
+
+    const targetSegment = resolved.split('/')[0];
+    if (!targetSegment || targetSegment === fileSegment) continue;
+    if ((dirFileCounts.get(targetSegment) ?? 0) < 3) continue;
+
+    assessments.push({
+      file,
+      type: 'warning',
+      rule: 'cross-boundary',
+      message: `New import crosses ${fileSegment}/${targetSegment} boundary`,
+      details: `${file} now imports from ${resolved}`,
+      suggestion: `Verify this cross-boundary import is intentional (${fileSegment} → ${targetSegment}).`,
+      dependencyContext: `boundary: ${fileSegment} → ${targetSegment}`,
+      dismissable: true,
+    });
+    break; // One warning per boundary crossing is enough
+  }
+
+  return assessments;
+}
+
+// ── Check 11: Stale import (deleted target) ─────────────────
+
+function checkStaleImport(file: string, ctx: ChangeContext): ChangeAssessment[] {
+  // Check if any recently deleted files were imported by this file
+  const recentDeletes = ctx.recentChanges
+    .filter((c) => c.type === 'unlink')
+    .map((c) => c.path);
+
+  if (recentDeletes.length === 0) return [];
+
+  const modelFile = ctx.model.files.find((f) => f.relativePath === file);
+  if (!modelFile) return [];
+
+  // Check graph edges: does this file import any recently deleted file?
+  const importTargets = new Set<string>();
+  for (const edge of ctx.model.graph.edges) {
+    if (edge.source === file && (edge.type === 'import' || edge.type === 'call')) {
+      importTargets.add(edge.target);
+    }
+  }
+
+  const assessments: ChangeAssessment[] = [];
+  for (const deleted of recentDeletes) {
+    if (importTargets.has(deleted)) {
+      assessments.push({
+        file,
+        type: 'warning',
+        rule: 'stale-import',
+        message: `Imports from ${deleted} which was just deleted`,
+        suggestion: `Update or remove the import from ${deleted} in ${file}.`,
+        dependencyContext: `deleted: ${deleted}, importer: ${file}`,
+        dismissable: true,
+      });
+    }
+  }
+
+  return assessments;
+}
+
+// ── Check 12: Inheritance change propagation ────────────────
+
+function checkInheritanceChange(file: string, ctx: ChangeContext): ChangeAssessment[] {
+  // Find files that inherit from symbols in this file
+  const children: string[] = [];
+  for (const edge of ctx.model.graph.edges) {
+    if (edge.type === 'inherit' && edge.target === file && edge.source !== file) {
+      children.push(edge.source);
+    }
+  }
+
+  if (children.length === 0) return [];
+
+  // Check if children were recently updated
+  const recentPaths = new Set(ctx.recentChanges.map((c) => c.path));
+  const missingChildren = children.filter((c) => !recentPaths.has(c));
+
+  if (missingChildren.length === 0) return [];
+
+  const shown = missingChildren.slice(0, 3);
+  const moreCount = missingChildren.length - shown.length;
+  const childList = shown.join(', ') + (moreCount > 0 ? `, +${moreCount} more` : '');
+
+  return [{
+    file,
+    type: 'warning',
+    rule: 'inheritance-change',
+    message: `Base class/interface modified — ${missingChildren.length} child${missingChildren.length === 1 ? '' : 'ren'} may need updates`,
+    details: `Not yet updated: ${childList}`,
+    suggestion: `Verify child implementations: ${missingChildren.join(', ')}`,
+    dependencyContext: `${children.length} children, ${missingChildren.length} not updated: [${missingChildren.join(', ')}]`,
     dismissable: true,
   }];
 }

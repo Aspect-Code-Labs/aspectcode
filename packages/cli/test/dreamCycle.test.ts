@@ -53,8 +53,8 @@ describe('correction tracker', () => {
     assert.equal(getUnprocessedCount(), 1);
   });
 
-  it('shouldDream returns true at threshold (5)', () => {
-    for (let i = 0; i < 4; i++) addCorrection('confirm', makeAssessment());
+  it('shouldDream returns true at threshold (10)', () => {
+    for (let i = 0; i < 9; i++) addCorrection('confirm', makeAssessment());
     assert.equal(shouldDream(), false);
     addCorrection('dismiss', makeAssessment());
     assert.equal(shouldDream(), true);

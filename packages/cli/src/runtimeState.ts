@@ -20,6 +20,8 @@ export interface RuntimeState {
   agentsContent: string | undefined;
   /** File contents map (relative path → content) from the most recent run. */
   fileContents: Map<string, string> | undefined;
+  /** Hub inDegree counts from last analysis — used to detect new hubs. */
+  previousHubCounts: Map<string, number>;
 }
 
 const state: RuntimeState = {
@@ -27,6 +29,7 @@ const state: RuntimeState = {
   kbContent: undefined,
   agentsContent: undefined,
   fileContents: undefined,
+  previousHubCounts: new Map(),
 };
 
 /** Get the current runtime state (read-only reference). */
@@ -45,4 +48,5 @@ export function resetRuntimeState(): void {
   state.kbContent = undefined;
   state.agentsContent = undefined;
   state.fileContents = undefined;
+  state.previousHubCounts = new Map();
 }

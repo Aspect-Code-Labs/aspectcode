@@ -40,7 +40,7 @@ import {
   saveDreamState,
 } from './dreamCycle';
 import { deleteScopedRules, writeRulesForPlatforms } from './scopedRules';
-import { autoResolveAssessment } from './autoResolve';
+import { autoResolveBatch, matchExistingPreference } from './autoResolve';
 import { renderAgentsMd } from './agentsMdRenderer';
 import { withUsageTracking } from './usageTracker';
 import { loadCredentials, updateCredentials, startBackgroundLogin, WEB_APP_URL } from './auth';
@@ -50,6 +50,10 @@ import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
 // ── Constants ────────────────────────────────────────────────
 
 const EVAL_DEBOUNCE_MS = 500;
+const CO_CHANGE_SETTLE_MS = 5_000;
+const AUTO_PROBE_IDLE_MS = 5 * 60 * 1000;
+const AUTO_PROBE_MIN_CHANGES = 20;
+const AUTO_PROBE_COOLDOWN_MS = 15 * 60 * 1000;
 
 const IGNORED_SEGMENTS = [
   '/node_modules/', '/.git/', '/dist/', '/build/', '/target/',
@@ -164,7 +168,7 @@ function buildManagedFiles(
 
   // ── Workspace-scope: .aspectcode files ──────────────────────
   if (preferenceCount > 0) {
-    files.push({ path: '☁ preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
+    files.push({ path: '☁  preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
   }
   const dreamStatePath = path.join(root, '.aspectcode', 'dream-state.json');
   if (fs.existsSync(dreamStatePath)) {
@@ -421,11 +425,18 @@ async function runOnce(
   }
 
   // ── 7. Persist runtime state ───────────────────────────────
+  // Snapshot hub counts before updating state (for new-hub detection)
+  const hubCounts = new Map<string, number>();
+  for (const hub of model.metrics.hubs) {
+    hubCounts.set(hub.file, hub.inDegree);
+  }
+
   updateRuntimeState({
     model,
     kbContent,
     agentsContent: finalContent,
     fileContents: workspace.relativeFiles,
+    previousHubCounts: hubCounts,
   });
 
   // ── 8. Scoped rules are managed exclusively by the dream cycle.
@@ -773,6 +784,65 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   let stopped = false;
   let pendingEvalEvents: FileChangeEvent[] = [];
 
+  // Co-change settle window — hold co-change assessments for 5s to see if dependents get updated
+  const pendingCoChange = new Map<string, { assessment: ChangeAssessment; dependents: string[]; addedAt: number }>();
+  let settleTimer: NodeJS.Timeout | undefined;
+  const recentlyChangedFiles = new Set<string>();
+
+  function parseDependents(ctx: string): string[] {
+    const match = ctx.match(/missing: \[([^\]]*)\]/);
+    if (!match) return [];
+    return match[1].split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  const resolveSettledCoChange = async (threshold: number, forwarded: ChangeAssessment[]): Promise<void> => {
+    settleTimer = undefined;
+    const surviving: ChangeAssessment[] = [];
+    for (const [, entry] of pendingCoChange) {
+      // Drop if all dependents were updated during settle window
+      const allUpdated = entry.dependents.length > 0 && entry.dependents.every((d) => recentlyChangedFiles.has(d));
+      if (!allUpdated) surviving.push(entry.assessment);
+    }
+    pendingCoChange.clear();
+
+    if (surviving.length > 0 && watchProvider) {
+      try {
+        const results = await autoResolveBatch(surviving, prefs, watchProvider, { threshold });
+        for (const result of results) {
+          if (result.autoResolved) {
+            const a = result.assessment;
+            const dir = path.dirname(a.file) + '/';
+            if (result.decision === 'allow') {
+              prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'allow', directory: dir, details: a.details, dependencyContext: a.dependencyContext });
+            } else {
+              prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'deny', file: a.file, directory: dir, details: a.details, suggestion: a.suggestion, dependencyContext: a.dependencyContext });
+            }
+            addCorrection(result.decision === 'allow' ? 'dismiss' : 'confirm', a);
+            const stats = { ...store.state.assessmentStats };
+            stats.autoResolved++;
+            store.state.assessmentStats = stats;
+          } else {
+            const a = result.assessment;
+            a.llmRecommendation = { decision: result.decision, confidence: result.confidence, reasoning: result.reasoning };
+            forwarded.push(a);
+          }
+        }
+        savePreferences(root, prefs);
+        store.setPreferenceCount(prefs.preferences.length);
+        if (forwarded.length > 0) store.pushAssessments(forwarded);
+      } catch (err: any) {
+        if (err?.tierExhausted) store.setTierExhausted();
+        store.pushAssessments(surviving);
+      }
+    } else if (surviving.length > 0) {
+      store.pushAssessments(surviving);
+    }
+  };
+
+  // Auto-probe tracking
+  let lastChangeAt = Date.now();
+  let lastProbeAt = Date.now();
+
   // Fire an immediate dream at session start to review/prune existing rules
   let sessionDreamDone = false;
   let lastDreamAt = Date.now();
@@ -877,7 +947,17 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     }, 3000);
   }
 
-  // ── Probe and refine (manual via 'r' key) ──────────────────
+  // ── Auto-probe timer: fires after sustained activity + idle period ──
+  const autoProbeTimer = setInterval(() => {
+    if (stopped || pipelineRunning) return;
+    const stats = store.state.assessmentStats;
+    if (stats.changes < AUTO_PROBE_MIN_CHANGES) return;
+    if (Date.now() - lastChangeAt < AUTO_PROBE_IDLE_MS) return;
+    if (Date.now() - lastProbeAt < AUTO_PROBE_COOLDOWN_MS) return;
+    void doProbeAndRefine();
+  }, 60_000);
+
+  // ── Probe and refine ──────────────────────────────────────
 
   const doProbeAndRefine = async (): Promise<void> => {
     if (stopped || pipelineRunning) return;
@@ -894,6 +974,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       prefs = await loadPreferences(root);
       store.setPreferenceCount(prefs.preferences.length);
       store.setPhase('watching');
+      lastProbeAt = Date.now();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`Probe and refine failed: ${msg}`);
@@ -933,6 +1014,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
         preferences: prefs,
         recentChanges: getRecentChanges(),
         fileContents: state.fileContents,
+        previousHubCounts: state.previousHubCounts,
       });
 
       // Auto-resolve assessments with LLM when available
@@ -940,34 +1022,88 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       const threshold = flags.background ? 0.0 : (userSettings?.autoResolveThreshold ?? 0.8);
 
       if (watchProvider && actionable.length > 0) {
-        const forwarded: ChangeAssessment[] = [];
+        // Split into cached (preference match) and uncached (need LLM)
+        const cached: { result: import('./autoResolve').AutoResolveResult }[] = [];
+        const uncached: ChangeAssessment[] = [];
         for (const a of actionable) {
-          try {
-            const result = await autoResolveAssessment(a, prefs, watchProvider, { threshold });
-            if (result.autoResolved) {
-              const dir = path.dirname(a.file) + '/';
-              if (result.decision === 'allow') {
-                prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'allow', directory: dir, details: a.details, dependencyContext: a.dependencyContext });
-              } else {
-                prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'deny', file: a.file, directory: dir, details: a.details, suggestion: a.suggestion, dependencyContext: a.dependencyContext });
+          const match = matchExistingPreference(a, prefs);
+          if (match) { cached.push({ result: match }); }
+          else { uncached.push(a); }
+        }
+
+        // Apply cached decisions immediately
+        for (const { result } of cached) {
+          const a = result.assessment;
+          addCorrection(result.decision === 'allow' ? 'dismiss' : 'confirm', a);
+          const stats = { ...store.state.assessmentStats };
+          stats.autoResolved++;
+          store.state.assessmentStats = stats;
+        }
+
+        // Batch-resolve uncached in a single LLM call
+        const forwarded: ChangeAssessment[] = [];
+        if (uncached.length > 0) {
+          // Check for co-change assessments that should wait for settle
+          const coChange: ChangeAssessment[] = [];
+          const immediate: ChangeAssessment[] = [];
+          for (const a of uncached) {
+            if (a.rule === 'co-change' && a.dependencyContext) {
+              coChange.push(a);
+            } else {
+              immediate.push(a);
+            }
+          }
+
+          // Hold co-change assessments for settle window
+          if (coChange.length > 0) {
+            for (const a of coChange) {
+              pendingCoChange.set(a.file, { assessment: a, dependents: parseDependents(a.dependencyContext ?? ''), addedAt: Date.now() });
+            }
+            if (!settleTimer) {
+              settleTimer = setTimeout(() => resolveSettledCoChange(threshold, forwarded), CO_CHANGE_SETTLE_MS);
+            }
+          }
+
+          // Batch-resolve immediate assessments
+          if (immediate.length > 0) {
+            try {
+              const results = await autoResolveBatch(immediate, prefs, watchProvider, { threshold });
+              for (const result of results) {
+                if (result.autoResolved) {
+                  const a = result.assessment;
+                  const dir = path.dirname(a.file) + '/';
+                  if (result.decision === 'allow') {
+                    prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'allow', directory: dir, details: a.details, dependencyContext: a.dependencyContext });
+                  } else {
+                    prefs = addPreference(prefs, { rule: a.rule, pattern: a.message, disposition: 'deny', file: a.file, directory: dir, details: a.details, suggestion: a.suggestion, dependencyContext: a.dependencyContext });
+                  }
+                  addCorrection(result.decision === 'allow' ? 'dismiss' : 'confirm', a);
+                  const stats = { ...store.state.assessmentStats };
+                  stats.autoResolved++;
+                  store.state.assessmentStats = stats;
+                } else {
+                  const a = result.assessment;
+                  a.llmRecommendation = { decision: result.decision, confidence: result.confidence, reasoning: result.reasoning };
+                  forwarded.push(a);
+                }
               }
               savePreferences(root, prefs);
               store.setPreferenceCount(prefs.preferences.length);
-              addCorrection(result.decision === 'allow' ? 'dismiss' : 'confirm', a);
-              store.setLearnedMessage(`Auto: ${result.decision} ${a.rule} (${Math.round(result.confidence * 100)}%)`);
-              const stats = { ...store.state.assessmentStats };
-              stats.autoResolved++;
-              store.state.assessmentStats = stats;
-            } else {
-              // Attach recommendation for display
-              a.llmRecommendation = { decision: result.decision, confidence: result.confidence, reasoning: result.reasoning };
-              forwarded.push(a);
+              if (cached.length > 0 || results.some((r) => r.autoResolved)) {
+                const autoCount = cached.length + results.filter((r) => r.autoResolved).length;
+                store.setLearnedMessage(`Auto-resolved ${autoCount} assessment${autoCount === 1 ? '' : 's'}`);
+              }
+            } catch (err: any) {
+              if (err?.tierExhausted) { store.setTierExhausted(); }
+              forwarded.push(...immediate);
             }
-          } catch (err: any) {
-            if (err?.tierExhausted) { store.setTierExhausted(); }
-            forwarded.push(a); // LLM failed — forward to user
+          } else if (cached.length > 0) {
+            store.setLearnedMessage(`Auto-resolved ${cached.length} assessment${cached.length === 1 ? '' : 's'}`);
           }
+        } else if (cached.length > 0) {
+          store.setLearnedMessage(`Auto-resolved ${cached.length} assessment${cached.length === 1 ? '' : 's'}`);
         }
+
         store.pushAssessments(forwarded);
       } else {
         store.pushAssessments(assessments);
@@ -996,6 +1132,11 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
     const posixPath = eventPath.replace(/\\/g, '/');
     pendingEvalEvents.push({ type: eventType, path: posixPath });
+    lastChangeAt = Date.now();
+
+    // Track recently changed files for co-change settle window
+    recentlyChangedFiles.add(posixPath);
+    setTimeout(() => recentlyChangedFiles.delete(posixPath), CO_CHANGE_SETTLE_MS + 1000);
 
     if (evalTimer) clearTimeout(evalTimer);
     evalTimer = setTimeout(() => {
@@ -1050,6 +1191,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       stopped = true;
       clearInterval(memoryMapInterval);
       clearInterval(autoDreamTimer);
+      clearInterval(autoProbeTimer);
       if (evalTimer) { clearTimeout(evalTimer); evalTimer = undefined; }
       log.blank();
       log.info(fmt.dim(`Stopping (${signal})…`));

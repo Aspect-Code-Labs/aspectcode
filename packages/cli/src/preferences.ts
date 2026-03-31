@@ -40,6 +40,16 @@ export interface LearnedPreference {
   lastHitAt?: string;
   /** Why the assessment fired (graph context). */
   dependencyContext?: string;
+
+  // ── Repo context (populated automatically, used for cross-project suggestions) ──
+  /** File extension (e.g. '.tsx', '.py'). */
+  fileExtension?: string;
+  /** Detected language (e.g. 'typescript', 'python'). */
+  language?: string;
+  /** Detected framework (e.g. 'react', 'nextjs'). */
+  framework?: string;
+  /** Repo structural pattern (e.g. 'monorepo', 'flat'). */
+  repoPattern?: string;
 }
 
 export interface PreferencesStore {
@@ -117,6 +127,21 @@ export function savePreferences(root: string, prefsStore: PreferencesStore): voi
 
 // ── Mutations ────────────────────────────────────────────────
 
+const EXT_TO_LANG: Record<string, string> = {
+  '.ts': 'typescript', '.tsx': 'typescript', '.js': 'javascript', '.jsx': 'javascript',
+  '.py': 'python', '.java': 'java', '.cs': 'csharp', '.go': 'go', '.rs': 'rust',
+  '.rb': 'ruby', '.php': 'php', '.swift': 'swift', '.kt': 'kotlin',
+};
+
+function inferRepoContext(filePath?: string): Pick<LearnedPreference, 'fileExtension' | 'language'> {
+  if (!filePath) return {};
+  const ext = path.extname(filePath).toLowerCase();
+  return {
+    fileExtension: ext || undefined,
+    language: EXT_TO_LANG[ext] || undefined,
+  };
+}
+
 export function addPreference(
   store: PreferencesStore,
   pref: Omit<LearnedPreference, 'id' | 'createdAt'>,
@@ -126,6 +151,14 @@ export function addPreference(
     .digest('hex')
     .slice(0, 12);
 
+  // Auto-populate repo context if not already set
+  const ctx = inferRepoContext(pref.file);
+  const enriched = {
+    ...pref,
+    fileExtension: pref.fileExtension ?? ctx.fileExtension,
+    language: pref.language ?? ctx.language,
+  };
+
   // Deduplicate — replace existing preference with same id
   const filtered = store.preferences.filter((p) => p.id !== id);
 
@@ -133,7 +166,7 @@ export function addPreference(
     ...store,
     preferences: [
       ...filtered,
-      { ...pref, id, createdAt: new Date().toISOString() },
+      { ...enriched, id, createdAt: new Date().toISOString() },
     ],
   };
 }
@@ -215,7 +248,7 @@ export function formatPreferencesForPrompt(prefsStore: PreferencesStore): string
     return `- "${p.rule}" enforced ${scope}: ${pattern}`;
   });
 
-  let block = `## Developer preferences\n\nConfirmed rules from watch mode corrections:\n\n${lines.join('\n')}`;
+  let block = `## Previous preferences\n\nConfirmed rules from watch mode corrections:\n\n${lines.join('\n')}`;
   if (block.length > MAX_PREFERENCES_BLOCK_CHARS) {
     block = block.slice(0, MAX_PREFERENCES_BLOCK_CHARS) + '\n...';
   }

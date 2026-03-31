@@ -262,13 +262,25 @@ const Dashboard: React.FC = () => {
       return;
     }
     if (current.llmRecommendation) {
-      // LLM has already decided — y/n are overrides
+      // Space pauses/unpauses the timer
+      if (input === ' ') {
+        setTimerPaused((p) => !p);
+        return;
+      }
+      // Enter accepts the LLM recommendation immediately
+      if (_key.return) {
+        handler({
+          type: current.llmRecommendation.decision === 'allow' ? 'dismiss' : 'confirm',
+          assessment: current,
+        });
+        return;
+      }
+      // y = confirm (enforce rule), n = dismiss (allow / suppress)
       if (input === 'n') {
         handler({ type: 'dismiss', assessment: current });
       } else if (input === 'y') {
         handler({ type: 'confirm', assessment: current });
       }
-      // No skip, no accept — LLM answer is the default via timer
     } else {
       // No LLM recommendation — classic y/n/s
       if (input === 'n') {
@@ -298,12 +310,15 @@ const Dashboard: React.FC = () => {
 
   // Timer for auto-resolving assessments with LLM recommendation
   const [autoTimer, setAutoTimer] = useState(30);
+  const [timerPaused, setTimerPaused] = useState(false);
   useEffect(() => {
     const cur = s.currentAssessment;
-    if (!cur?.llmRecommendation) { setAutoTimer(30); return; }
-    setAutoTimer(30);
+    if (!cur?.llmRecommendation) { setAutoTimer(20); setTimerPaused(false); return; }
+    setAutoTimer(20);
+    setTimerPaused(false);
     const interval = setInterval(() => {
       setAutoTimer((t) => {
+        if (timerPaused) return t;
         if (t <= 1) {
           // Auto-apply LLM decision
           const handler = (store as any)._onAssessmentAction as ((a: any) => void) | undefined;
@@ -319,7 +334,7 @@ const Dashboard: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [s.currentAssessment]);
+  }, [s.currentAssessment, timerPaused]);
   const warningMsg = useAutoMessage(s.warning, () => store.setWarning(''), 5000);
   const changeFlash = useAutoMessage(s.lastChangeFlash, () => store.setLastChangeFlash(''));
   const current = s.currentAssessment;
@@ -487,13 +502,23 @@ const Dashboard: React.FC = () => {
           ) : null}
           {current.llmRecommendation ? (
             <>
-              <Text color={COLORS.primary}>
-                {`  → ${current.llmRecommendation.decision} (${Math.round(current.llmRecommendation.confidence * 100)}%) — ${current.llmRecommendation.reasoning}`}
+              <Text color={COLORS.gray} dimColor>
+                {`  ${Math.round(current.llmRecommendation.confidence * 100)}% — ${current.llmRecommendation.reasoning}`}
               </Text>
               <Box>
-                <Text color={COLORS.gray}>{'  [y] override: confirm  [n] override: dismiss'}</Text>
+                {current.llmRecommendation.decision === 'deny' ? (
+                  <Text>
+                    <Text color={COLORS.primary} bold>{'  [enter] enforce rule'}</Text>
+                    <Text color={COLORS.gray}>{'  [n] allow  [space] pause timer'}</Text>
+                  </Text>
+                ) : (
+                  <Text>
+                    <Text color={COLORS.primary} bold>{'  [enter] allow'}</Text>
+                    <Text color={COLORS.gray}>{'  [y] enforce rule  [space] pause timer'}</Text>
+                  </Text>
+                )}
                 {autoTimer > 0 && (
-                  <Text color={COLORS.gray}>{`  (${autoTimer}s)`}</Text>
+                  <Text color={COLORS.gray}>{timerPaused ? '  (paused)' : `  (${autoTimer}s)`}</Text>
                 )}
               </Box>
             </>
@@ -531,18 +556,14 @@ const Dashboard: React.FC = () => {
             parts.push(`${stats.changes} file changes`);
             if (stats.warnings > 0) parts.push(`${stats.warnings} warnings`);
             if (stats.violations > 0) parts.push(`${stats.violations} violations`);
-            if (s.preferenceCount > 0) parts.push(`${s.preferenceCount} learned`);
             if (stats.autoResolved > 0) parts.push(`${stats.autoResolved} auto-resolved`);
-            if (stats.autoResolved > 0) parts.push(`${stats.autoResolved} auto`);
             return parts.join(' · ');
           })()}
         </Text>
       )}
       {isWatching && (
-        <Text>
-          <Text color={COLORS.primaryDim}>{'[r] probe & refine'}</Text>
-          {s.recommendProbe ? <Text color={COLORS.primary}>{' ●'}</Text> : null}
-          <Text color={COLORS.gray}>{'  [s] settings'}</Text>
+        <Text color={COLORS.gray} dimColor>
+          {'[r] optimize  [s] settings'}
         </Text>
       )}
 
@@ -565,10 +586,20 @@ const Dashboard: React.FC = () => {
             {`${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}  (BYOK)`}
           </Text>
         )
-      ) : (
+      ) : s.userTier === 'pro' ? (
         <Text color={COLORS.gray} dimColor>
-          {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} ${s.userTier === 'free' ? 'lifetime' : 'weekly'} tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}${s.userTier === 'pro' && s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`}
+          {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} weekly tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}${s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`}
         </Text>
+      ) : s.tierTokensUsed >= 75_000 ? (
+        <Text color={COLORS.gray} dimColor>
+          {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} lifetime tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}`}
+        </Text>
+      ) : (
+        s.sessionUsage.calls > 0 ? (
+          <Text color={COLORS.gray} dimColor>
+            {`${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}`}
+          </Text>
+        ) : null
       )}
     </Box>
   );

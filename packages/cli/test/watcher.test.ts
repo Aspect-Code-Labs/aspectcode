@@ -599,7 +599,7 @@ describe('formatPreferencesForPrompt', () => {
       directory: 'src/components/',
     });
     const result = formatPreferencesForPrompt(store);
-    assert.ok(result.includes('Developer preferences'));
+    assert.ok(result.includes('Previous preferences'));
     assert.ok(result.includes('naming-convention'));
     assert.ok(result.includes('src/components/bad_naming.tsx'));
   });

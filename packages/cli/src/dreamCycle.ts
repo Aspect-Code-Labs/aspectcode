@@ -34,7 +34,7 @@ export interface DreamResult {
 
 // ── Constants ────────────────────────────────────────────────
 
-const DREAM_THRESHOLD = 5;
+const DREAM_THRESHOLD = 10;
 const DIR_NAME = '.aspectcode';
 const STATE_FILE = 'dream-state.json';
 
