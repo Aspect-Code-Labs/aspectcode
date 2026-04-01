@@ -238,9 +238,15 @@ function extractExportNamesRegex(content: string, language: string): string[] {
 function extractImportModulesRegex(content: string, language: string): string[] {
   const modules: string[] = [];
   if (language === 'typescript' || language === 'javascript') {
-    const re = /from\s+['"]([^'"]+)['"]/g;
+    // ES imports: import ... from '...'
+    const esRe = /from\s+['"]([^'"]+)['"]/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
+    while ((m = esRe.exec(content)) !== null) {
+      modules.push(m[1]);
+    }
+    // CommonJS: require('...')
+    const cjsRe = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+    while ((m = cjsRe.exec(content)) !== null) {
       modules.push(m[1]);
     }
   } else if (language === 'python') {

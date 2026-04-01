@@ -32,7 +32,7 @@ import { store } from './ui/store';
 import { loadCredentials } from './auth';
 import { withUsageTracking } from './usageTracker';
 import type { PreferencesStore } from './preferences';
-import { formatPreferencesForPrompt } from './preferences';
+import { addPreference, formatPreferencesForPrompt, savePreferences } from './preferences';
 
 import type { ScopedRule } from './scopedRules';
 
@@ -161,9 +161,9 @@ export async function tryOptimize(
 
   const scopedRuleCreates: ScopedRule[] = [];
   const scopedRuleDeletes: string[] = [];
+  const allAppliedEdits: AgentsEdit[] = [];
 
   if (evaluatorEnabled) {
-    const allAppliedEdits: AgentsEdit[] = [];
     const iterationSummaries: string[] = [];
     let totalEditsApplied = 0;
 
@@ -566,6 +566,27 @@ export async function tryOptimize(
       }
       log.info(`Evaluator created/updated ${scopedRuleCreates.length} scoped rule${scopedRuleCreates.length === 1 ? '' : 's'}`);
     }
+  }
+
+  // ── Save probe-refine edits as preferences ───────────────
+  if (evaluatorEnabled && allAppliedEdits.length > 0 && preferences) {
+    try {
+      let prefs = { ...preferences };
+      for (const edit of allAppliedEdits) {
+        const isSpecific = edit.section.startsWith('scoped:') ||
+          /(?:^|\s)(?:\.\/|src\/|lib\/|app\/|packages\/|test\/|tests\/)\S+\.\w{1,4}/m.test(edit.content);
+        prefs = addPreference(prefs, {
+          rule: `probe-refine:${edit.section}`,
+          pattern: edit.content.slice(0, 200),
+          disposition: 'deny',
+          directory: edit.globs?.[0],
+          details: `action: ${edit.action}, section: ${edit.section}`,
+          suggestion: edit.content,
+          source: isSpecific ? 'probe-refine-specific' : 'probe-refine',
+        });
+      }
+      savePreferences(root, prefs);
+    } catch { /* best-effort — don't break the pipeline */ }
   }
 
   return { content: finalContent, reasoning: [], scopedRules: finalRules, deleteSlugs: scopedRuleDeletes };

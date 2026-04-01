@@ -41,6 +41,10 @@ export interface LearnedPreference {
   /** Why the assessment fired (graph context). */
   dependencyContext?: string;
 
+  // ── Origin ──
+  /** Where this preference came from. */
+  source?: 'assessment' | 'probe-refine' | 'probe-refine-specific';
+
   // ── Repo context (populated automatically, used for cross-project suggestions) ──
   /** File extension (e.g. '.tsx', '.py'). */
   fileExtension?: string;
@@ -263,7 +267,8 @@ export interface Suggestion {
   directory: string | null;
   confidence: number;
   userCount: number;
-  description: string;
+  /** Actionable text from the most-used preference in this group. */
+  suggestion: string;
 }
 
 export async function fetchSuggestions(

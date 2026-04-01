@@ -225,7 +225,7 @@ const Dashboard: React.FC = () => {
         return;
       }
       if (input === 'k') {
-        store.setLearnedMessage('Add "apiKey": "sk-..." to aspectcode.json, or set ASPECTCODE_LLM_KEY in your env');
+        store.setLearnedMessage('Add "apiKey": "sk-..." to aspectcode.json or ASPECTCODE_LLM_KEY to .env, then restart aspectcode');
         return;
       }
     }
@@ -460,7 +460,7 @@ const Dashboard: React.FC = () => {
 
       {/* ── Dream cycle in progress ───────────────── */}
       {s.dreaming && (
-        <Text color={COLORS.primary}>{`${dreamSpinner} refining context — ${s.correctionCount} correction${s.correctionCount === 1 ? '' : 's'}…`}</Text>
+        <Text color={COLORS.primary}>{`${dreamSpinner} refining context…`}</Text>
       )}
 
       {/* ── Community suggestions (auto-applied via dream cycle) ────── */}
@@ -534,7 +534,7 @@ const Dashboard: React.FC = () => {
           {(() => {
             const stats = s.assessmentStats;
             const parts: string[] = [];
-            parts.push(`${stats.changes} file changes`);
+            parts.push(`${stats.changes} source file change${stats.changes === 1 ? '' : 's'}`);
             if (stats.warnings > 0) parts.push(`${stats.warnings} warnings`);
             if (stats.violations > 0) parts.push(`${stats.violations} violations`);
             if (stats.autoResolved > 0) parts.push(`${stats.autoResolved} auto-resolved`);
@@ -556,20 +556,17 @@ const Dashboard: React.FC = () => {
           </Text>
           <Text>{''}</Text>
           <Text color={COLORS.primaryDim}>{'  [u] Upgrade to Pro — $8/mo, 1M tokens/week'}</Text>
-          {s.suggestions.length > 0 && (
-            <Text color={COLORS.gray}>{`      ${s.suggestions.length} community suggestion${s.suggestions.length === 1 ? '' : 's'} ready for your codebase`}</Text>
-          )}
-          <Text color={COLORS.gray} dimColor>{'  [k] Add your own key: ASPECTCODE_LLM_KEY=sk-...'}</Text>
+          <Text color={COLORS.gray} dimColor>{'  [k] Add your own key (restart required after adding)'}</Text>
         </Box>
       )}
 
-      {/* ── Usage tracker (always visible for free/pro, after first call for byok) ── */}
+      {/* ── Usage tracker ── */}
       {s.userTier === 'byok' ? (
-        s.sessionUsage.calls > 0 && (
-          <Text color={COLORS.gray} dimColor>
-            {`${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}  (BYOK)`}
-          </Text>
-        )
+        <Text color={COLORS.gray} dimColor>
+          {s.sessionUsage.calls > 0
+            ? `${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}  (BYOK)`
+            : 'BYOK — 0 calls'}
+        </Text>
       ) : s.userTier === 'pro' ? (
         <Text color={s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.95 ? COLORS.red : s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.8 ? COLORS.yellow : COLORS.gray} dimColor={s.tierTokensCap === 0 || s.tierTokensUsed / s.tierTokensCap < 0.8}>
           {`${formatTokens(s.tierTokensUsed)} / ${formatTokens(s.tierTokensCap)} weekly tokens${s.sessionUsage.calls > 0 ? ` · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'}` : ''}${s.tierResetAt ? `  (resets ${new Date(s.tierResetAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })})` : ''}`}

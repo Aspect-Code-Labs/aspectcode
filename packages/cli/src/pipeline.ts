@@ -53,7 +53,7 @@ const EVAL_DEBOUNCE_MS = 500;
 const CO_CHANGE_SETTLE_MS = 5_000;
 const AUTO_PROBE_IDLE_MS = 5 * 60 * 1000;
 const AUTO_PROBE_MIN_CHANGES = 20;
-const AUTO_PROBE_COOLDOWN_MS = 15 * 60 * 1000;
+const AUTO_PROBE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 const IGNORED_SEGMENTS = [
   '/node_modules/', '/.git/', '/dist/', '/build/', '/target/',
@@ -370,11 +370,12 @@ async function runOnce(
     }
 
     store.setPhase('optimizing');
-    // No static scoped rules — the dream cycle is the sole author of rules
+    // Skip probe-and-refine if tier is already exhausted
+    const skipProbe = probeAndRefine && store.state.tierExhausted;
     let optimizeResult;
     try {
       optimizeResult = await tryOptimize(
-        ctx, kbContent, toolInstructions, config, baseContent, probeAndRefine, preferences, userSettings, [],
+        ctx, kbContent, toolInstructions, config, baseContent, skipProbe ? false : probeAndRefine, preferences, userSettings, [],
       );
     } catch (err: any) {
       if (err?.tierExhausted) {
@@ -930,7 +931,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   // ── Dream cycle (autonomous) ────────────────────────────────
 
   const doDreamCycle = async (): Promise<void> => {
-    if (pipelineRunning || stopped) return;
+    if (pipelineRunning || stopped || store.state.tierExhausted) return;
     store.setDreamPrompt(false);
 
     const state = getRuntimeState();
@@ -1057,7 +1058,9 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   const AUTO_DREAM_INTERVAL_MS = 2 * 60 * 1000;
   const autoDreamTimer = setInterval(() => {
     if (stopped || pipelineRunning) return;
-    if (getUnprocessedCount() === 0) return;
+    const hasCorrections = getUnprocessedCount() > 0;
+    const hasSuggestions = store.state.suggestions.length > 0 && !store.state.suggestionsDismissed;
+    if (!hasCorrections && !hasSuggestions) return;
     if (Date.now() - lastDreamAt < AUTO_DREAM_INTERVAL_MS) return;
     void doDreamCycle().then(() => { lastDreamAt = Date.now(); });
   }, 30_000);
@@ -1086,6 +1089,10 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
 
   const doProbeAndRefine = async (): Promise<void> => {
     if (stopped || pipelineRunning) return;
+    if (store.state.tierExhausted) {
+      store.setLearnedMessage('Token limit reached — upgrade or add your own key');
+      return;
+    }
     // Run pending dream cycle before full probe-and-refine
     // Dream before re-running if corrections exist
     if (getUnprocessedCount() > 0) await doDreamCycle();

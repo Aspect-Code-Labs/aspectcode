@@ -247,6 +247,23 @@ async function main(): Promise<void> {
     }
   }
 
+  // Check for updates (non-blocking — runs sync but fast, 5s timeout)
+  try {
+    const { checkForUpdate } = await import('./updateChecker');
+    const updateResult = checkForUpdate();
+    if (updateResult) {
+      if (updateResult.updated) {
+        // Re-exec with the new version
+        console.log(`✓ ${updateResult.message} — restarting...`);
+        const { execSync } = await import('child_process');
+        execSync(`aspectcode ${process.argv.slice(2).join(' ')}`, { stdio: 'inherit' });
+        return;
+      }
+      // Store message for dashboard display
+      (globalThis as any).__updateMessage = updateResult.message;
+    }
+  } catch { /* update check is best-effort */ }
+
   if (flags.noColor) {
     disableColor();
   }

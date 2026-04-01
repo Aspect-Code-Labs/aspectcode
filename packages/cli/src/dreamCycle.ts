@@ -188,7 +188,7 @@ If you have scoped rule changes, add "---SCOPED_RULES---" then a JSON array:
 To delete: [{"slug":"id","action":"delete"}]
 If no changes to scoped rules, just output AGENTS.md with no delimiter.`;
 
-function buildDreamUserPrompt(agentsMd: string, corrs: Correction[], scopedRulesContext?: string, userRulesContext?: string): string {
+function buildDreamUserPrompt(agentsMd: string, corrs: Correction[], scopedRulesContext?: string, userRulesContext?: string, communitySuggestions?: string): string {
   const formattedCorrections = corrs.map((c, i) => {
     const label = c.action === 'confirm' ? 'CONFIRMED' : 'DISMISSED';
     const a = c.assessment;
@@ -228,6 +228,13 @@ ${userRulesContext}
 
 CORRECTIONS (from watch mode):
 ${formattedCorrections}`;
+  }
+
+  if (communitySuggestions) {
+    prompt += `
+
+COMMUNITY INSIGHTS (from similar ${corrs.length > 0 ? '' : 'open-source '}projects — integrate only what's relevant to THIS project):
+${communitySuggestions}`;
   }
 
   prompt += `
@@ -323,10 +330,11 @@ export async function runDreamCycle(options: {
   log?: OptLogger;
   scopedRulesContext?: string;
   userRulesContext?: string;
+  communitySuggestions?: string;
 }): Promise<DreamResult> {
-  const { currentAgentsMd, corrections: corrs, provider, log, scopedRulesContext, userRulesContext } = options;
+  const { currentAgentsMd, corrections: corrs, provider, log, scopedRulesContext, userRulesContext, communitySuggestions } = options;
 
-  if (corrs.length === 0 && !scopedRulesContext) {
+  if (corrs.length === 0 && !scopedRulesContext && !communitySuggestions) {
     return { updatedAgentsMd: currentAgentsMd, changes: [], scopedRules: [], deleteSlugs: [] };
   }
 
@@ -334,7 +342,7 @@ export async function runDreamCycle(options: {
 
   const messages: ChatMessage[] = [
     { role: 'system', content: DREAM_SYSTEM },
-    { role: 'user', content: buildDreamUserPrompt(currentAgentsMd, corrs, scopedRulesContext, userRulesContext) },
+    { role: 'user', content: buildDreamUserPrompt(currentAgentsMd, corrs, scopedRulesContext, userRulesContext, communitySuggestions) },
   ];
 
   const response = await withRetry(
