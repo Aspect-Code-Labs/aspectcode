@@ -192,7 +192,11 @@ describe('parseSmartIgnoreResponse', () => {
 
 // ── loadWorkspaceFiles integration ──────────────────────────
 
-describe('loadWorkspaceFiles', () => {
+describe('loadWorkspaceFiles', function () {
+  // Some tests create/delete 5001 files to cross the smart-ignore threshold;
+  // that is slow on some filesystems, so widen the timeout for tests + hooks.
+  this.timeout(30_000);
+
   let tmpDir: string;
   const quietLog = {
     info(_msg: string) {},
@@ -352,8 +356,7 @@ describe('loadWorkspaceFiles', () => {
     assert.ok(!result.tierExhausted);
   });
 
-  it('propagates BYOK exhaustion from smart-ignore via tierExhausted/byokReason', async function () {
-    this.timeout(30_000); // creates 5001 files — slow on some filesystems
+  it('propagates BYOK exhaustion from smart-ignore via tierExhausted/byokReason', async () => {
     // Create >5000 files to trigger smart ignore
     const srcDir = path.join(tmpDir, 'src');
     fs.mkdirSync(srcDir);
@@ -388,8 +391,7 @@ describe('loadWorkspaceFiles', () => {
     assert.ok(result.relativeFiles.size > 5000);
   });
 
-  it('does not flag tierExhausted on non-exhaustion provider errors', async function () {
-    this.timeout(30_000); // creates 5001 files — slow on some filesystems
+  it('does not flag tierExhausted on non-exhaustion provider errors', async () => {
     const srcDir = path.join(tmpDir, 'src');
     fs.mkdirSync(srcDir);
     for (let i = 0; i < 5001; i++) {
