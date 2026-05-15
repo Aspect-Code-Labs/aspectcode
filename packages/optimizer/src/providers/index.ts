@@ -70,13 +70,43 @@ const PROVIDER_FACTORIES: Record<
 };
 
 /**
+ * Read an API key from `env` and strip surrounding whitespace.
+ *
+ * Keys copy-pasted into `aspectcode.json` or a `.env` file routinely pick up
+ * a stray leading/trailing space or newline. The provider APIs reject those
+ * verbatim with a 401, which looks exactly like an invalid key — so trim here.
+ */
+function readKey(env: Record<string, string>, name: string): string | undefined {
+  const raw = env[name];
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * True when the environment carries a usable personal API key — i.e. the user
+ * is in BYOK mode. Checks `ASPECTCODE_LLM_KEY` and the standard provider env
+ * vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). This is the single source of
+ * truth for "is this BYOK?" — keep it in sync with `resolveProvider` below.
+ */
+export function byokKeyPresent(env: Record<string, string>): boolean {
+  if (readKey(env, 'ASPECTCODE_LLM_KEY')) return true;
+  for (const envKey of Object.values(PROVIDER_ENV_KEYS)) {
+    if (readKey(env, envKey)) return true;
+  }
+  return false;
+}
+
+/**
  * Resolve an LlmProvider from environment variables.
  *
- * Resolution order:
- * 1. ASPECTCODE_LLM_KEY — explicit opt-in to use a personal API key
+ * Resolution order — a personal API key always wins over the hosted proxy,
+ * so BYOK is the default whenever a key is present (in `.env`, the
+ * environment, or injected from `aspectcode.json`):
+ * 1. ASPECTCODE_LLM_KEY — explicit personal key
  * 2. LLM_PROVIDER explicitly set + matching standard API key
- * 3. Logged in → hosted proxy (default for authenticated users)
- * 4. Legacy fallback: standard env var names (only if NOT logged in)
+ * 3. Standard provider env vars (OPENAI_API_KEY / ANTHROPIC_API_KEY)
+ * 4. Logged in → hosted proxy
  *
  * @param env - Merged environment (from .env + process.env)
  * @param providerOptions - Optional model/temperature/maxTokens overrides
@@ -91,8 +121,8 @@ export function resolveProvider(
     model,
   };
 
-  // 1. Explicit opt-in: ASPECTCODE_LLM_KEY
-  const explicitKey = env['ASPECTCODE_LLM_KEY'];
+  // 1. Explicit personal key: ASPECTCODE_LLM_KEY
+  const explicitKey = readKey(env, 'ASPECTCODE_LLM_KEY');
   if (explicitKey) {
     const forcedProvider = env[LLM_PROVIDER_ENV] as ProviderName | undefined;
     // Auto-detect provider from key format if not explicitly set
@@ -110,7 +140,7 @@ export function resolveProvider(
         `Unknown LLM_PROVIDER "${forcedProvider}". Supported: ${Object.keys(PROVIDER_ENV_KEYS).join(', ')}`,
       );
     }
-    const apiKey = env[envKey];
+    const apiKey = readKey(env, envKey);
     if (!apiKey) {
       throw new Error(
         `LLM_PROVIDER is set to "${forcedProvider}" but ${envKey} is not defined.\n` +
@@ -120,21 +150,21 @@ export function resolveProvider(
     return PROVIDER_FACTORIES[forcedProvider](apiKey, opts);
   }
 
-  // 3. Logged in → hosted proxy (preferred for authenticated users)
+  // 3. Standard provider env vars — a personal key takes precedence over the
+  //    hosted proxy, so a key in `.env` is always honored even when logged in.
+  const providerOrder: ProviderName[] = ['openai', 'anthropic'];
+  for (const name of providerOrder) {
+    const apiKey = readKey(env, PROVIDER_ENV_KEYS[name]);
+    if (apiKey) {
+      return PROVIDER_FACTORIES[name](apiKey, opts);
+    }
+  }
+
+  // 4. Logged in → hosted proxy (used only when no personal key is present)
   const cliToken = env['ASPECTCODE_CLI_TOKEN'];
   if (cliToken) {
     const { createAspectCodeProvider } = require('./aspectcode');
     return createAspectCodeProvider(cliToken, opts) as LlmProvider;
-  }
-
-  // 4. Legacy fallback: standard env var names (only if NOT logged in)
-  const providerOrder: ProviderName[] = ['openai', 'anthropic'];
-  for (const name of providerOrder) {
-    const envKey = PROVIDER_ENV_KEYS[name];
-    const apiKey = env[envKey];
-    if (apiKey) {
-      return PROVIDER_FACTORIES[name](apiKey, opts);
-    }
   }
 
   throw new Error(

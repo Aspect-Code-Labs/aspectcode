@@ -45,7 +45,7 @@ import { renderAgentsMd } from './agentsMdRenderer';
 import { withUsageTracking } from './usageTracker';
 import { loadCredentials, updateCredentials, startBackgroundLogin, WEB_APP_URL } from './auth';
 import type { ManagedFile } from './ui/store';
-import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
+import { resolveProvider, loadEnvFile, byokKeyPresent } from '@aspectcode/optimizer';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -158,26 +158,18 @@ function buildManagedFiles(
     } catch { /* unreadable dir */ }
   }
 
-  // ── Workspace-scope: settings ───────────────────────────────
-  if (platforms.includes('claude')) {
-    const settingsLocal = path.join(root, '.claude', 'settings.local.json');
-    if (fs.existsSync(settingsLocal)) {
-      files.push({ path: '.claude/settings.local.json', annotation: '○ user', updatedAt: fileMtime(settingsLocal), category: 'workspace-config', scope: 'workspace', owner: 'user' });
-    }
-  }
-
   // ── Workspace-scope: .aspectcode files ──────────────────────
   if (preferenceCount > 0) {
-    files.push({ path: '☁  preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
+    files.push({ path: 'preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
   }
+  // Dream-cycle freshness is surfaced in the status bar, not as a file entry.
   const dreamStatePath = path.join(root, '.aspectcode', 'dream-state.json');
   if (fs.existsSync(dreamStatePath)) {
     try {
       const ds = JSON.parse(fs.readFileSync(dreamStatePath, 'utf-8'));
-      const lastDream = ds.lastDreamAt ? new Date(ds.lastDreamAt).getTime() : 0;
-      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: lastDream, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+      store.setLastDreamAt(ds.lastDreamAt ? new Date(ds.lastDreamAt).getTime() : 0);
     } catch {
-      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: 0, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+      store.setLastDreamAt(0);
     }
   }
 
@@ -759,8 +751,21 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   store.setUserEmail(creds?.email ?? '');
 
   // ── Detect tier ──────────────────────────────────────────
+  // BYOK is the default whenever a personal key is reachable — in the
+  // workspace `.env`, the environment, or `aspectcode.json`. Mirror exactly
+  // what resolveProvider() will pick so the dashboard never disagrees with
+  // the provider that actually runs.
   const projectConfig = loadConfig(root);
-  const hasByokKey = !!(projectConfig?.apiKey || process.env.ASPECTCODE_LLM_KEY);
+  let hasByokKey = false;
+  try {
+    const tierEnv = loadEnvFile(root);
+    if (projectConfig?.apiKey && !tierEnv['ASPECTCODE_LLM_KEY']) {
+      tierEnv['ASPECTCODE_LLM_KEY'] = projectConfig.apiKey;
+    }
+    hasByokKey = byokKeyPresent(tierEnv);
+  } catch {
+    hasByokKey = !!(projectConfig?.apiKey || process.env.ASPECTCODE_LLM_KEY);
+  }
 
   if (hasByokKey) {
     store.setTierInfo('byok', 0, 0);
@@ -984,6 +989,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       const env = loadEnvFile(root);
       const creds = loadCredentials();
       if (creds && !env['ASPECTCODE_CLI_TOKEN']) env['ASPECTCODE_CLI_TOKEN'] = creds.token;
+      if (projectConfig?.apiKey && !env['ASPECTCODE_LLM_KEY']) env['ASPECTCODE_LLM_KEY'] = projectConfig.apiKey;
       provider = withUsageTracking(resolveProvider(env));
     } catch { return; }
 
@@ -1130,7 +1136,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     if (stopped || pipelineRunning) return;
     if (store.state.tierExhausted) {
       const msg = store.state.userTier === 'byok'
-        ? (store.state.byokExhaustedReason || 'BYOK key out of credit — add credit or use a different key')
+        ? (store.state.byokExhaustedReason || 'API key out of credit — add credit or use a different key')
         : 'Token limit reached — add your own key (ASPECTCODE_LLM_KEY) to continue';
       store.setLearnedMessage(msg);
       return;

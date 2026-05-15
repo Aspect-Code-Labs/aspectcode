@@ -30,7 +30,7 @@ interface MemoryMapProps {
 
 // ── Relative time formatting ─────────────────────────────────
 
-function relativeTime(epochMs: number): string {
+export function relativeTime(epochMs: number): string {
   if (epochMs === 0) return '';
   const diffS = Math.floor((Date.now() - epochMs) / 1000);
   if (diffS < 5) return 'just now';
@@ -224,7 +224,7 @@ function buildEntries(files: ManagedFile[], userEmail: string): TreeEntry[] {
 
   // Cloud status (visually separated)
   entries.push({
-    label: '☁  cloud',
+    label: 'cloud',
     annotation: userEmail || 'not logged in [l]',
     updatedAt: 0,
     indent: 0,

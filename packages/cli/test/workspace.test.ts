@@ -192,7 +192,11 @@ describe('parseSmartIgnoreResponse', () => {
 
 // ── loadWorkspaceFiles integration ──────────────────────────
 
-describe('loadWorkspaceFiles', () => {
+describe('loadWorkspaceFiles', function () {
+  // Some tests create/delete 5001 files to cross the smart-ignore threshold;
+  // that is slow on some filesystems, so widen the timeout for tests + hooks.
+  this.timeout(30_000);
+
   let tmpDir: string;
   const quietLog = {
     info(_msg: string) {},
