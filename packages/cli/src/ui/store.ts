@@ -192,6 +192,8 @@ export interface DashboardState {
   syncStatus: 'idle' | 'syncing' | 'synced' | 'offline';
   /** Epoch ms of last successful sync. */
   lastSyncAt: number;
+  /** Epoch ms of the last completed dream-cycle refinement (0 = never). */
+  lastDreamAt: number;
   /** Community suggestions for this project type. */
   suggestions: Array<{ rule: string; disposition: string; directory: string | null; suggestion: string }>;
   /** Cumulative LLM usage for this session. */
@@ -253,6 +255,7 @@ class DashboardStore extends EventEmitter {
     updateMessage: '',
     syncStatus: 'idle',
     lastSyncAt: 0,
+    lastDreamAt: 0,
     sessionUsage: { inputTokens: 0, outputTokens: 0, calls: 0 },
     suggestions: [],
     userTier: 'hosted',
@@ -436,6 +439,10 @@ class DashboardStore extends EventEmitter {
 
   setManagedFiles(files: ManagedFile[]): void {
     this.update({ managedFiles: files });
+  }
+
+  setLastDreamAt(epochMs: number): void {
+    this.update({ lastDreamAt: epochMs });
   }
 
   setSessionUsage(usage: DashboardState['sessionUsage']): void {

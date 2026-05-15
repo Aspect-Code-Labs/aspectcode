@@ -158,26 +158,18 @@ function buildManagedFiles(
     } catch { /* unreadable dir */ }
   }
 
-  // ── Workspace-scope: settings ───────────────────────────────
-  if (platforms.includes('claude')) {
-    const settingsLocal = path.join(root, '.claude', 'settings.local.json');
-    if (fs.existsSync(settingsLocal)) {
-      files.push({ path: '.claude/settings.local.json', annotation: '○ user', updatedAt: fileMtime(settingsLocal), category: 'workspace-config', scope: 'workspace', owner: 'user' });
-    }
-  }
-
   // ── Workspace-scope: .aspectcode files ──────────────────────
   if (preferenceCount > 0) {
-    files.push({ path: '☁  preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
+    files.push({ path: 'preferences', annotation: `${preferenceCount} learned`, updatedAt: 0, category: 'cloud', scope: 'workspace', owner: 'aspectcode' });
   }
+  // Dream-cycle freshness is surfaced in the status bar, not as a file entry.
   const dreamStatePath = path.join(root, '.aspectcode', 'dream-state.json');
   if (fs.existsSync(dreamStatePath)) {
     try {
       const ds = JSON.parse(fs.readFileSync(dreamStatePath, 'utf-8'));
-      const lastDream = ds.lastDreamAt ? new Date(ds.lastDreamAt).getTime() : 0;
-      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: lastDream, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+      store.setLastDreamAt(ds.lastDreamAt ? new Date(ds.lastDreamAt).getTime() : 0);
     } catch {
-      files.push({ path: '.aspectcode/dream-state.json', annotation: '', updatedAt: 0, category: 'aspectcode', scope: 'workspace', owner: 'aspectcode' });
+      store.setLastDreamAt(0);
     }
   }
 

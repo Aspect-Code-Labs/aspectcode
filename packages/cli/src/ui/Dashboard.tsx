@@ -12,7 +12,7 @@ import type { Key } from 'ink';
 import { COLORS } from './theme';
 import { store } from './store';
 import type { DashboardState, PipelinePhase, EvalPhase } from './store';
-import MemoryMap from './MemoryMap';
+import MemoryMap, { relativeTime } from './MemoryMap';
 import SettingsPanel from './SettingsPanel';
 import type { UserSettings, AspectCodeConfig } from '../config';
 import { loadConfig, saveConfig, saveUserSettings } from '../config';
@@ -451,6 +451,9 @@ const Dashboard: React.FC = () => {
           ) : null}
           {s.userEmail && s.syncStatus === 'offline' ? (
             <Text color={COLORS.yellow}>{` — ☁  offline`}</Text>
+          ) : null}
+          {s.lastDreamAt > 0 ? (
+            <Text dimColor>{` · refined ${relativeTime(s.lastDreamAt)}`}</Text>
           ) : null}
         </Text>
       )}
