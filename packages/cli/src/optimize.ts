@@ -113,7 +113,7 @@ export async function tryOptimize(
       diagnosisProvider = provider;
     } else {
       try {
-        diagnosisProvider = withUsageTracking(resolveProvider(env, { ...providerOptions, model: 'claude-sonnet-4-20250514' }));
+        diagnosisProvider = withUsageTracking(resolveProvider(env, { ...providerOptions, model: 'claude-sonnet-4-6' }));
       } catch {
         diagnosisProvider = provider; // Fall back to same provider
       }

@@ -63,7 +63,7 @@ export interface LlmProvider {
 
 /** Options passed to provider factory functions. */
 export interface ProviderOptions {
-  /** Model identifier (e.g. "gpt-4o", "claude-sonnet-4-20250514"). */
+  /** Model identifier (e.g. "gpt-4o", "claude-sonnet-4-6"). */
   model?: string;
   /** Sampling temperature (0–2). */
   temperature?: number;
