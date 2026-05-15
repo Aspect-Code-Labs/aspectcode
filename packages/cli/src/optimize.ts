@@ -105,11 +105,18 @@ export async function tryOptimize(
   let diagnosisProvider; // Sonnet for higher-quality diagnosis
   try {
     provider = withUsageTracking(resolveProvider(env, providerOptions));
-    // Use Sonnet for the diagnosis step (higher quality for the most impactful call)
-    try {
-      diagnosisProvider = withUsageTracking(resolveProvider(env, { ...providerOptions, model: 'claude-sonnet-4-20250514' }));
-    } catch {
-      diagnosisProvider = provider; // Fall back to same provider
+    // Use Sonnet for the diagnosis step (higher quality for the most impactful
+    // call) — but only when the provider understands Anthropic model IDs
+    // (Anthropic BYOK or the hosted proxy). An OpenAI BYOK key would 404 on a
+    // Claude model, so reuse the base provider in that case.
+    if (provider.name === 'openai') {
+      diagnosisProvider = provider;
+    } else {
+      try {
+        diagnosisProvider = withUsageTracking(resolveProvider(env, { ...providerOptions, model: 'claude-sonnet-4-20250514' }));
+      } catch {
+        diagnosisProvider = provider; // Fall back to same provider
+      }
     }
   } catch (providerErr) {
     store.addSetupNote('no LLM available — using static content');

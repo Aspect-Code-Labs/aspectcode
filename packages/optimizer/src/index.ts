@@ -15,6 +15,6 @@ export type {
   OptLogger,
 } from './types';
 
-export { resolveProvider, loadEnvFile } from './providers/index';
+export { resolveProvider, loadEnvFile, byokKeyPresent } from './providers/index';
 export { withRetry } from './providers/retry';
 export { runGenerateAgent } from './agent';

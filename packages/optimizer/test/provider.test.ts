@@ -3,7 +3,7 @@
  */
 
 import * as assert from 'node:assert/strict';
-import { parseDotenv, resolveProvider, loadEnvFile } from '../src/providers/index';
+import { parseDotenv, resolveProvider, loadEnvFile, byokKeyPresent } from '../src/providers/index';
 
 describe('parseDotenv', () => {
   it('parses basic key=value pairs', () => {
@@ -96,6 +96,73 @@ describe('resolveProvider', () => {
   it('resolves Anthropic provider when ANTHROPIC_API_KEY is set', () => {
     const provider = resolveProvider({ ANTHROPIC_API_KEY: 'sk-ant-test' });
     assert.equal(provider.name, 'anthropic');
+  });
+
+  it('prefers a personal key over the hosted proxy when logged in', () => {
+    const provider = resolveProvider({
+      ASPECTCODE_CLI_TOKEN: 'cli-token',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
+    });
+    assert.equal(provider.name, 'anthropic');
+  });
+
+  it('prefers ASPECTCODE_LLM_KEY over the hosted proxy when logged in', () => {
+    const provider = resolveProvider({
+      ASPECTCODE_CLI_TOKEN: 'cli-token',
+      ASPECTCODE_LLM_KEY: 'sk-ant-test',
+    });
+    assert.equal(provider.name, 'anthropic');
+  });
+
+  it('uses the hosted proxy when only a CLI token is present', () => {
+    const provider = resolveProvider({ ASPECTCODE_CLI_TOKEN: 'cli-token' });
+    assert.ok(provider.name.includes('hosted'));
+  });
+
+  it('trims surrounding whitespace from ASPECTCODE_LLM_KEY', () => {
+    const provider = resolveProvider({ ASPECTCODE_LLM_KEY: '  sk-ant-test\n' });
+    assert.equal(provider.name, 'anthropic');
+  });
+
+  it('trims surrounding whitespace from standard provider keys', () => {
+    const provider = resolveProvider({ OPENAI_API_KEY: '  sk-openai-test  ' });
+    assert.equal(provider.name, 'openai');
+  });
+
+  it('ignores a whitespace-only key', () => {
+    assert.throws(
+      () => resolveProvider({ OPENAI_API_KEY: '   ' }),
+      (err: Error) => {
+        assert.ok(err.message.includes('No LLM available'));
+        return true;
+      },
+    );
+  });
+});
+
+describe('byokKeyPresent', () => {
+  it('true when ASPECTCODE_LLM_KEY is set', () => {
+    assert.ok(byokKeyPresent({ ASPECTCODE_LLM_KEY: 'sk-ant-test' }));
+  });
+
+  it('true when OPENAI_API_KEY is set', () => {
+    assert.ok(byokKeyPresent({ OPENAI_API_KEY: 'sk-test' }));
+  });
+
+  it('true when ANTHROPIC_API_KEY is set', () => {
+    assert.ok(byokKeyPresent({ ANTHROPIC_API_KEY: 'sk-ant-test' }));
+  });
+
+  it('false when only a CLI token is present', () => {
+    assert.ok(!byokKeyPresent({ ASPECTCODE_CLI_TOKEN: 'cli-token' }));
+  });
+
+  it('false for an empty environment', () => {
+    assert.ok(!byokKeyPresent({}));
+  });
+
+  it('false for a whitespace-only key', () => {
+    assert.ok(!byokKeyPresent({ ANTHROPIC_API_KEY: '   ' }));
   });
 });
 

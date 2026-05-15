@@ -352,7 +352,8 @@ describe('loadWorkspaceFiles', () => {
     assert.ok(!result.tierExhausted);
   });
 
-  it('propagates BYOK exhaustion from smart-ignore via tierExhausted/byokReason', async () => {
+  it('propagates BYOK exhaustion from smart-ignore via tierExhausted/byokReason', async function () {
+    this.timeout(30_000); // creates 5001 files — slow on some filesystems
     // Create >5000 files to trigger smart ignore
     const srcDir = path.join(tmpDir, 'src');
     fs.mkdirSync(srcDir);
@@ -387,7 +388,8 @@ describe('loadWorkspaceFiles', () => {
     assert.ok(result.relativeFiles.size > 5000);
   });
 
-  it('does not flag tierExhausted on non-exhaustion provider errors', async () => {
+  it('does not flag tierExhausted on non-exhaustion provider errors', async function () {
+    this.timeout(30_000); // creates 5001 files — slow on some filesystems
     const srcDir = path.join(tmpDir, 'src');
     fs.mkdirSync(srcDir);
     for (let i = 0; i < 5001; i++) {

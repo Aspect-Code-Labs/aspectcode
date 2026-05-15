@@ -549,11 +549,10 @@ const Dashboard: React.FC = () => {
       {s.tierExhausted && s.userTier === 'byok' && (
         <Box flexDirection="column" marginTop={1}>
           <Text color={COLORS.red} bold>
-            {s.byokExhaustedReason || 'BYOK API key has no remaining credit, or is invalid.'}
+            {s.byokExhaustedReason || 'Your API key has no remaining credit, or is invalid.'}
           </Text>
           <Text>{''}</Text>
-          <Text color={COLORS.gray} dimColor>{'  Add credit at your provider (OpenAI / Anthropic) or use a different key.'}</Text>
-          <Text color={COLORS.gray} dimColor>{'  Or unset ASPECTCODE_LLM_KEY (and remove `apiKey` from aspectcode.json) to fall back to the hosted tier.'}</Text>
+          <Text color={COLORS.gray} dimColor>{'  Add credit at your provider (OpenAI / Anthropic), or use a different key.'}</Text>
         </Box>
       )}
       {s.tierExhausted && s.userTier !== 'byok' && (
@@ -570,8 +569,8 @@ const Dashboard: React.FC = () => {
       {s.userTier === 'byok' ? (
         <Text color={COLORS.gray} dimColor>
           {s.sessionUsage.calls > 0
-            ? `BYOK · ${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'} this session`
-            : 'BYOK · unlimited · 0 calls this session'}
+            ? `${formatTokens(s.sessionUsage.inputTokens)} in · ${formatTokens(s.sessionUsage.outputTokens)} out · ${s.sessionUsage.calls} call${s.sessionUsage.calls === 1 ? '' : 's'} this session`
+            : '0 calls this session'}
         </Text>
       ) : s.tierTokensUsed >= 75_000 ? (
         <Text color={s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.95 ? COLORS.red : s.tierTokensCap > 0 && s.tierTokensUsed / s.tierTokensCap >= 0.8 ? COLORS.yellow : COLORS.gray} dimColor={s.tierTokensCap === 0 || s.tierTokensUsed / s.tierTokensCap < 0.8}>

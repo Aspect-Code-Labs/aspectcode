@@ -12,6 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { fmt } from './logger';
+import { loadEnvFile, byokKeyPresent } from '@aspectcode/optimizer';
 
 export const WEB_APP_URL = process.env.ASPECTCODE_WEB_URL ?? 'https://aspectcode.com';
 const CREDENTIALS_DIR = path.join(os.homedir(), '.aspectcode');
@@ -349,26 +350,30 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/** Detect BYOK from env var or current directory's aspectcode.json. */
+/**
+ * Detect a personal API key — checked against the `.env` file, the
+ * environment, and the current directory's `aspectcode.json`.
+ */
 function detectByok(): boolean {
-  if (process.env.ASPECTCODE_LLM_KEY) return true;
+  try {
+    if (byokKeyPresent(loadEnvFile(process.cwd()))) return true;
+  } catch { /* ignore — fall through to config check */ }
   try {
     const cfgPath = path.join(process.cwd(), 'aspectcode.json');
     if (!fs.existsSync(cfgPath)) return false;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as { apiKey?: string };
-    return Boolean(cfg.apiKey);
+    return Boolean(cfg.apiKey && cfg.apiKey.trim());
   } catch {
     return false;
   }
 }
 
 export async function usageCommand(): Promise<void> {
-  // BYOK: no server-side token tracking. Show a clear message and exit.
+  // Personal API key: no server-side token tracking. Show a message and exit.
   if (detectByok()) {
     console.log();
-    console.log(`  ${fmt.bold('Mode:')}  Bring Your Own Key (BYOK)`);
-    console.log(`  ${fmt.dim('Tokens are billed directly to your provider account (OpenAI / Anthropic).')}`);
-    console.log(`  ${fmt.dim('Aspect Code does not track or limit BYOK usage.')}`);
+    console.log(`  ${fmt.bold('Using your own API key.')}`);
+    console.log(`  ${fmt.dim('Usage is billed directly to your provider account (OpenAI / Anthropic).')}`);
     console.log();
     return;
   }

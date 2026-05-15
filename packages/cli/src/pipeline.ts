@@ -45,7 +45,7 @@ import { renderAgentsMd } from './agentsMdRenderer';
 import { withUsageTracking } from './usageTracker';
 import { loadCredentials, updateCredentials, startBackgroundLogin, WEB_APP_URL } from './auth';
 import type { ManagedFile } from './ui/store';
-import { resolveProvider, loadEnvFile } from '@aspectcode/optimizer';
+import { resolveProvider, loadEnvFile, byokKeyPresent } from '@aspectcode/optimizer';
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -759,8 +759,21 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
   store.setUserEmail(creds?.email ?? '');
 
   // ── Detect tier ──────────────────────────────────────────
+  // BYOK is the default whenever a personal key is reachable — in the
+  // workspace `.env`, the environment, or `aspectcode.json`. Mirror exactly
+  // what resolveProvider() will pick so the dashboard never disagrees with
+  // the provider that actually runs.
   const projectConfig = loadConfig(root);
-  const hasByokKey = !!(projectConfig?.apiKey || process.env.ASPECTCODE_LLM_KEY);
+  let hasByokKey = false;
+  try {
+    const tierEnv = loadEnvFile(root);
+    if (projectConfig?.apiKey && !tierEnv['ASPECTCODE_LLM_KEY']) {
+      tierEnv['ASPECTCODE_LLM_KEY'] = projectConfig.apiKey;
+    }
+    hasByokKey = byokKeyPresent(tierEnv);
+  } catch {
+    hasByokKey = !!(projectConfig?.apiKey || process.env.ASPECTCODE_LLM_KEY);
+  }
 
   if (hasByokKey) {
     store.setTierInfo('byok', 0, 0);
@@ -1130,7 +1143,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
     if (stopped || pipelineRunning) return;
     if (store.state.tierExhausted) {
       const msg = store.state.userTier === 'byok'
-        ? (store.state.byokExhaustedReason || 'BYOK key out of credit — add credit or use a different key')
+        ? (store.state.byokExhaustedReason || 'API key out of credit — add credit or use a different key')
         : 'Token limit reached — add your own key (ASPECTCODE_LLM_KEY) to continue';
       store.setLearnedMessage(msg);
       return;
