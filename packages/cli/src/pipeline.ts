@@ -989,6 +989,7 @@ export async function runPipeline(ctx: RunContext): Promise<ExitCodeValue> {
       const env = loadEnvFile(root);
       const creds = loadCredentials();
       if (creds && !env['ASPECTCODE_CLI_TOKEN']) env['ASPECTCODE_CLI_TOKEN'] = creds.token;
+      if (projectConfig?.apiKey && !env['ASPECTCODE_LLM_KEY']) env['ASPECTCODE_LLM_KEY'] = projectConfig.apiKey;
       provider = withUsageTracking(resolveProvider(env));
     } catch { return; }
 
